@@ -9,11 +9,15 @@ Suggested GitHub repo: `https://github.com/kapilmoond/aakalan-agy`
 
 ## What the user gets
 
-1. Download the Windows installer EXE from GitHub Releases.
+1. Download the Windows installer EXE from the website or GitHub Releases.
 2. Install (Start Menu + Desktop shortcut).
 3. First launch asks to install `agy` if missing.
 4. Then **Sign in with Google**.
-5. Chat in a normal desktop window.
+5. Chat, WhatsApp QR connect, Hermes-style memory, audio/file input.
+
+Website button (after you upload the Release):
+
+`https://github.com/kapilmoond/aakalan-agy/releases/download/v1.1.0/AakalanAgy-Setup-1.1.0-win-x64.exe`
 
 ## Run from source
 

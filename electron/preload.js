@@ -11,5 +11,16 @@ contextBridge.exposeInMainWorld('agy', {
   installAgy: () => ipcRenderer.invoke('install-agy'),
   signInGoogle: () => ipcRenderer.invoke('sign-in-google'),
   openAgyLogin: () => ipcRenderer.invoke('open-agy-login'),
-  finishSetup: () => ipcRenderer.invoke('finish-setup')
+  finishSetup: () => ipcRenderer.invoke('finish-setup'),
+  memoryRead: () => ipcRenderer.invoke('memory-read'),
+  memoryWrite: (payload) => ipcRenderer.invoke('memory-write', payload),
+  memoryRemember: (line) => ipcRenderer.invoke('memory-remember', line),
+  pickFiles: (kind) => ipcRenderer.invoke('pick-files', kind),
+  whatsappStatus: () => ipcRenderer.invoke('whatsapp-status'),
+  whatsappConnect: () => ipcRenderer.invoke('whatsapp-connect'),
+  whatsappDisconnect: () => ipcRenderer.invoke('whatsapp-disconnect'),
+  onWhatsApp: (fn) => {
+    ipcRenderer.removeAllListeners('whatsapp-event')
+    ipcRenderer.on('whatsapp-event', (_event, data) => fn(data))
+  }
 })

@@ -1,4 +1,5 @@
 node_modules/
+whatsapp-bridge/node_modules/
 release/
 dist/
 *.log

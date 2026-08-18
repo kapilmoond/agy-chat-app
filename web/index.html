@@ -90,6 +90,9 @@
         <div class="sub" id="emailLine">Not signed in</div>
       </div>
       <button id="newChat" type="button">New chat</button>
+      <button class="ghost" id="tabChat" type="button">Chat</button>
+      <button class="ghost" id="tabMemory" type="button">Memory</button>
+      <button class="ghost" id="tabWhatsapp" type="button">WhatsApp</button>
       <label class="sub">Model
         <select id="model"><option value="">agy default</option></select>
       </label>
@@ -98,25 +101,63 @@
       <div class="sessions" id="sessions"></div>
     </aside>
     <main>
-      <div class="bar">
-        <div>
-          <strong id="title">New chat</strong><br />
-          <small id="status">Ready</small>
+      <div id="panelChat" style="display:flex;flex-direction:column;height:100%;min-height:0;">
+        <div class="bar">
+          <div>
+            <strong id="title">New chat</strong><br />
+            <small id="status">Ready</small>
+          </div>
+          <small id="agyPath"></small>
         </div>
-        <small id="agyPath"></small>
+        <div id="log">
+          <div class="empty">Ask Agy anything. Memory, files, audio and WhatsApp work like Hermes / Aakalan Agent.</div>
+        </div>
+        <div id="attachBar" class="sub" style="padding:0 18px;"></div>
+        <form class="composer" id="form">
+          <button class="ghost" id="btnAudio" type="button">Audio</button>
+          <button class="ghost" id="btnFile" type="button">File</button>
+          <textarea id="input" placeholder="Message Agy…  Audio and files are sent with the next message."></textarea>
+          <button id="send" type="submit">Send</button>
+        </form>
       </div>
-      <div id="log">
-        <div class="empty">Ask Agy anything. Follow-up messages stay in the same conversation.</div>
+      <div id="panelMemory" class="hidden" style="padding:18px; overflow:auto;">
+        <h2>Memory system</h2>
+        <p class="sub">Same idea as Hermes / Aakalan: core memory always loaded, daily notes for new lessons. agy reads this on every turn.</p>
+        <label class="sub">MEMORY.md
+          <textarea id="memCore" style="width:100%;min-height:220px;margin-top:6px;"></textarea>
+        </label>
+        <label class="sub">daily_learning.md
+          <textarea id="memDaily" style="width:100%;min-height:160px;margin-top:6px;"></textarea>
+        </label>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button id="saveMem" type="button">Save memory</button>
+          <input id="rememberLine" type="text" placeholder="Add one daily note…" style="flex:1;" />
+          <button class="ghost" id="addNote" type="button">Add note</button>
+        </div>
       </div>
-      <form class="composer" id="form">
-        <textarea id="input" placeholder="Message Agy…" required></textarea>
-        <button id="send" type="submit">Send</button>
-      </form>
+      <div id="panelWhatsapp" class="hidden" style="padding:18px; overflow:auto;">
+        <h2>WhatsApp</h2>
+        <p class="sub">Connect your own phone like Aakalan Agent. Scan the QR in WhatsApp → Linked devices. Only your chat with yourself is used by default.</p>
+        <p id="waState" class="sub">Not connected</p>
+        <div id="waQr" style="margin:12px 0;"></div>
+        <div style="display:flex;gap:8px;">
+          <button id="waConnect" type="button">Connect WhatsApp</button>
+          <button class="ghost" id="waDisconnect" type="button">Disconnect</button>
+        </div>
+      </div>
     </main>
   </section>
 
   <script>
-    const state = { sessionId: null, sessions: [], busy: false, status: {} };
+    const state = { sessionId: null, sessions: [], busy: false, status: {}, attachments: [] };
+
+    function showPanel(name) {
+      $("panelChat").classList.toggle("hidden", name !== "chat");
+      $("panelMemory").classList.toggle("hidden", name !== "memory");
+      $("panelWhatsapp").classList.toggle("hidden", name !== "whatsapp");
+      if (name === "chat") $("panelChat").style.display = "flex";
+      else $("panelChat").style.display = "none";
+    }
     const $ = (id) => document.getElementById(id);
 
     function escapeHtml(value) {
@@ -230,6 +271,72 @@
       }
     };
 
+    function renderAttach() {
+      $("attachBar").textContent = state.attachments.length
+        ? ("Attached: " + state.attachments.map((p) => p.split(/[\\/]/).pop()).join(", "))
+        : "";
+    }
+
+    $("tabChat").onclick = () => showPanel("chat");
+    $("tabMemory").onclick = async () => {
+      showPanel("memory");
+      const mem = await window.agy.memoryRead();
+      $("memCore").value = mem.core || "";
+      $("memDaily").value = mem.daily || "";
+    };
+    $("tabWhatsapp").onclick = async () => {
+      showPanel("whatsapp");
+      const wa = await window.agy.whatsappStatus();
+      paintWa(wa);
+    };
+    $("saveMem").onclick = async () => {
+      await window.agy.memoryWrite({ core: $("memCore").value, daily: $("memDaily").value });
+      $("status").textContent = "Memory saved";
+    };
+    $("addNote").onclick = async () => {
+      const line = $("rememberLine").value.trim();
+      if (!line) return;
+      const mem = await window.agy.memoryRemember(line);
+      $("memDaily").value = mem.daily || "";
+      $("rememberLine").value = "";
+    };
+    $("btnAudio").onclick = async () => {
+      const files = await window.agy.pickFiles("audio");
+      state.attachments.push(...(files || []));
+      renderAttach();
+    };
+    $("btnFile").onclick = async () => {
+      const files = await window.agy.pickFiles("file");
+      state.attachments.push(...(files || []));
+      renderAttach();
+    };
+
+    function paintWa(wa) {
+      $("waState").textContent = wa.connected
+        ? "WhatsApp connected"
+        : wa.hasSession
+          ? "Session saved, starting…"
+          : "Not connected";
+      $("waQr").innerHTML = wa.qr
+        ? `<img alt="WhatsApp QR" style="width:240px;height:240px;background:#fff;padding:8px" src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(wa.qr)}" />`
+        : "";
+    }
+
+    window.agy.onWhatsApp((event) => {
+      if (event.type === "qr") paintWa({ connected: false, qr: event.qr });
+      if (event.type === "connected" || event.type === "paired") paintWa({ connected: true, qr: null });
+      if (event.type === "disconnected") paintWa({ connected: false, qr: null });
+    });
+
+    $("waConnect").onclick = async () => {
+      $("waState").textContent = "Preparing QR…";
+      const wa = await window.agy.whatsappConnect();
+      paintWa(wa);
+    };
+    $("waDisconnect").onclick = async () => {
+      paintWa(await window.agy.whatsappDisconnect());
+    };
+
     $("newChat").onclick = async () => {
       const session = await window.agy.newSession($("model").value);
       state.sessions.unshift(session);
@@ -246,7 +353,7 @@
     $("form").onsubmit = async (event) => {
       event.preventDefault();
       const text = $("input").value.trim();
-      if (!text || state.busy) return;
+      if ((!text && !state.attachments.length) || state.busy) return;
       state.busy = true;
       $("send").disabled = true;
       $("status").textContent = "agy is working…";
@@ -262,8 +369,11 @@
         const data = await window.agy.chat({
           message: text,
           session_id: state.sessionId,
-          model: $("model").value
+          model: $("model").value,
+          attachments: state.attachments.slice()
         });
+        state.attachments = [];
+        renderAttach();
         const idx = state.sessions.findIndex((s) => s.id === data.session.id);
         if (idx >= 0) state.sessions[idx] = data.session;
         else state.sessions.unshift(data.session);

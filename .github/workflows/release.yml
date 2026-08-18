@@ -18,6 +18,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm --prefix whatsapp-bridge install --omit=dev
       - run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:

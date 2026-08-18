@@ -1,8 +1,8 @@
 {
   "name": "aakalan-agy",
   "productName": "Aakalan Agy",
-  "version": "1.0.0",
-  "description": "Desktop chat app for Google Antigravity CLI (agy). Separate from Aakalan Agent.",
+  "version": "1.1.0",
+  "description": "Desktop Agy app: Google sign-in, WhatsApp, Hermes-style memory, audio/files. Separate from Aakalan Agent.",
   "author": "Aaklan Infra Consultancy",
   "license": "MIT",
   "main": "electron/main.js",
@@ -37,6 +37,10 @@
       {
         "from": "assets/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "whatsapp-bridge",
+        "to": "whatsapp-bridge"
       }
     ],
     "win": {

@@ -3,6 +3,8 @@ const { spawn, spawnSync } = require('child_process')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const memory = require('./memory')
+const { WhatsAppService } = require('./whatsapp')
 
 const HOME = os.homedir()
 const AGY_DEFAULT = path.join(process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local'), 'agy', 'bin', 'agy.EXE')
@@ -182,12 +184,31 @@ function getStatus() {
     email,
     workspace: cfg.workspace,
     setupDone: Boolean(cfg.setupDone && agyPath && email),
-    models: agyPath ? listModels() : []
+    models: agyPath ? listModels() : [],
+    whatsapp: whatsapp ? whatsapp.status() : { connected: false, hasSession: false, qr: null },
+    memory: memory.readMemory(app.getPath('userData'))
   }
+}
+
+function buildPrompt(userText, attachments) {
+  const parts = []
+  const brief = memory.brief(app.getPath('userData'))
+  if (brief) {
+    parts.push('Core memory (follow this):\n' + brief)
+  }
+  if (attachments && attachments.length) {
+    parts.push(
+      'Attached files on disk (read them if needed):\n' +
+        attachments.map((item) => `- ${item}`).join('\n')
+    )
+  }
+  parts.push('User:\n' + userText)
+  return parts.join('\n\n')
 }
 
 let mainWindow = null
 let chatBusy = false
+let whatsapp = null
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -210,6 +231,36 @@ function createWindow() {
 
 app.whenReady().then(() => {
   fs.mkdirSync(stateDir(), { recursive: true })
+  memory.ensureMemory(app.getPath('userData'))
+  memory.syncWorkspaceMemory(app.getPath('userData'), loadConfig().workspace)
+  whatsapp = new WhatsAppService({
+    app,
+    userData: app.getPath('userData'),
+    onEvent: (event) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('whatsapp-event', event)
+      }
+    },
+    onIncoming: async (msg) => {
+      const text = String(msg.body || '').trim()
+      if (!text) return
+      const prompt = buildPrompt('WhatsApp from ' + (msg.senderName || msg.senderId) + ':\n' + text)
+      const result = await runAgy(['--output-format', 'json', '--print-timeout', '5m', '--print', prompt], {
+        cwd: loadConfig().workspace
+      })
+      const parsed = extractReply(result.stdout)
+      if (parsed.text) {
+        await whatsapp.send(msg.chatId, parsed.text)
+      }
+    }
+  })
+  if (whatsapp.status().hasSession) {
+    try {
+      whatsapp.startBridge()
+    } catch {
+      /* connect later from UI */
+    }
+  }
   createWindow()
 })
 
@@ -323,7 +374,8 @@ ipcMain.handle('finish-setup', () => {
 
 ipcMain.handle('chat', async (_event, payload) => {
   if (chatBusy) throw new Error('agy is still answering.')
-  const message = String(payload?.message || '').trim()
+  const attachments = payload?.attachments || []
+  const message = String(payload?.message || '').trim() || (attachments.length ? 'Please use the attached file(s).' : '')
   if (!message) throw new Error('Empty message')
   if (!getStatus().signedIn) throw new Error('Sign in with Google first')
   chatBusy = true
@@ -343,10 +395,11 @@ ipcMain.handle('chat', async (_event, payload) => {
     }
     session.messages.push({ role: 'user', content: message, ts: Date.now() })
     if (!session.title || session.title === 'New chat') session.title = message.slice(0, 48)
+    memory.syncWorkspaceMemory(app.getPath('userData'), loadConfig().workspace)
     const args = ['--output-format', 'json', '--print-timeout', '5m']
     if (session.conversation_id) args.push('--conversation', session.conversation_id)
     if (payload.model) args.push('--model', payload.model)
-    args.push('--print', message)
+    args.push('--print', buildPrompt(message, payload.attachments || []))
     const result = await runAgy(args, { cwd: loadConfig().workspace })
     const parsed = extractReply(result.stdout)
     if (parsed.conversationId) session.conversation_id = parsed.conversationId
@@ -356,4 +409,44 @@ ipcMain.handle('chat', async (_event, payload) => {
   } finally {
     chatBusy = false
   }
+})
+
+ipcMain.handle('memory-read', () => memory.readMemory(app.getPath('userData')))
+
+ipcMain.handle('memory-write', (_event, payload) => {
+  return memory.writeMemory(app.getPath('userData'), payload || {})
+})
+
+ipcMain.handle('memory-remember', (_event, line) => {
+  return memory.remember(app.getPath('userData'), line)
+})
+
+ipcMain.handle('pick-files', async (_event, kind) => {
+  const audio = kind === 'audio'
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: audio
+      ? [{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'ogg', 'aac', 'flac', 'webm'] }]
+      : [{ name: 'All files', extensions: ['*'] }]
+  })
+  if (result.canceled) return []
+  const inbox = path.join(loadConfig().workspace || HOME, 'agy-inbox')
+  fs.mkdirSync(inbox, { recursive: true })
+  return result.filePaths.map((src) => {
+    const dest = path.join(inbox, `${Date.now()}-${path.basename(src)}`)
+    fs.copyFileSync(src, dest)
+    return dest
+  })
+})
+
+ipcMain.handle('whatsapp-status', () => (whatsapp ? whatsapp.status() : { connected: false }))
+
+ipcMain.handle('whatsapp-connect', async () => {
+  if (!whatsapp) throw new Error('WhatsApp service is not ready')
+  return whatsapp.startPairing()
+})
+
+ipcMain.handle('whatsapp-disconnect', async () => {
+  if (!whatsapp) throw new Error('WhatsApp service is not ready')
+  return whatsapp.disconnect()
 })
