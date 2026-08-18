@@ -116,6 +116,17 @@ try {
     .digest('hex')
     .slice(0, 16);
 } catch {}
+const PUSH_URL = String(process.env.AGY_PUSH_URL || '').trim();
+
+function pushIncoming(event) {
+  if (!PUSH_URL) return;
+  fetch(PUSH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(event),
+  }).catch(() => {});
+}
+
 const PAIR_ONLY = args.includes('--pair-only');
 const PAIR_JSON = args.includes('--pair-json');
 const WHATSAPP_MODE = getArg('mode', process.env.WHATSAPP_MODE || 'self-chat'); // "bot" or "self-chat"
@@ -834,6 +845,7 @@ async function startSocket() {
 
       messageStore.remember(msg);
       messageQueue.push(event);
+      pushIncoming(event);
       emitDebugEvent({
         stage: 'queued',
         chatId: redactWhatsAppId(chatId),

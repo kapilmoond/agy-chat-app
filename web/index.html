@@ -93,6 +93,7 @@
       <button class="ghost" id="tabChat" type="button">Chat</button>
       <button class="ghost" id="tabMemory" type="button">Memory</button>
       <button class="ghost" id="tabWhatsapp" type="button">WhatsApp</button>
+      <button class="ghost" id="tabWorkspace" type="button">Workspace</button>
       <label class="sub">Model
         <select id="model"><option value="">agy default</option></select>
       </label>
@@ -120,7 +121,7 @@
         <form class="composer" id="form">
           <button class="ghost" id="btnAudio" type="button">Audio</button>
           <button class="ghost" id="btnFile" type="button">File</button>
-          <textarea id="input" placeholder="Message Agy…  Audio and files are sent with the next message."></textarea>
+          <textarea id="input" placeholder="Message Agy… Or paste Google client JSON / localhost callback URL here."></textarea>
           <button id="send" type="submit">Send</button>
         </form>
       </div>
@@ -145,10 +146,27 @@
         <p id="waState" class="sub">Not connected</p>
         <p id="waErr" class="err"></p>
         <div id="waQr" style="margin:12px 0;"></div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button id="waConnect" type="button">Connect WhatsApp</button>
           <button class="ghost" id="waDisconnect" type="button">Disconnect</button>
+          <button class="ghost" id="waSendFile" type="button">Send file</button>
         </div>
+        <p class="sub" style="margin-top:12px;">Voice notes are transcribed. New chats go to Agy immediately. Use Send file to push a document through WhatsApp.</p>
+      </div>
+      <div id="panelWorkspace" class="hidden" style="padding:18px; overflow:auto;">
+        <h2>Google Workspace</h2>
+        <p class="sub">Give the Google Cloud OAuth client JSON (Desktop app). Aakalan Agy opens the Google URL. After sign-in, paste the localhost URL if the browser does not return by itself. This enables Gmail, Drive, Calendar, Docs and Sheets.</p>
+        <p id="wsGoogleState" class="sub">Not connected</p>
+        <p id="wsGoogleErr" class="err"></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+          <button id="wsPickJson" type="button">Choose JSON file</button>
+          <button class="ghost" id="wsDisconnect" type="button">Disconnect Workspace</button>
+        </div>
+        <label class="sub">Or paste the client JSON, or the localhost callback URL
+          <textarea id="wsPaste" style="width:100%;min-height:110px;margin-top:6px;" placeholder='{"installed":{"client_id":"...","client_secret":"..."}}  or  http://127.0.0.1:17893/?code=...'></textarea>
+        </label>
+        <button id="wsUsePaste" type="button" style="margin-top:8px;">Use pasted JSON / URL</button>
+        <p class="sub" id="wsAuthLink" style="margin-top:12px;word-break:break-all;"></p>
       </div>
     </main>
   </section>
@@ -160,6 +178,7 @@
       $("panelChat").classList.toggle("hidden", name !== "chat");
       $("panelMemory").classList.toggle("hidden", name !== "memory");
       $("panelWhatsapp").classList.toggle("hidden", name !== "whatsapp");
+      $("panelWorkspace").classList.toggle("hidden", name !== "workspace");
       if (name === "chat") $("panelChat").style.display = "flex";
       else $("panelChat").style.display = "none";
     }
@@ -295,6 +314,52 @@
       showPanel("whatsapp");
       const wa = await window.agy.whatsappStatus();
       paintWa(wa);
+    };
+    function paintGoogle(gs) {
+      $("wsGoogleState").textContent = gs.connected
+        ? ("Workspace connected: " + (gs.email || "Google account"))
+        : gs.waiting
+          ? "Waiting for Google sign-in…"
+          : "Not connected";
+      $("wsAuthLink").textContent = gs.authUrl || "";
+    }
+    $("tabWorkspace").onclick = async () => {
+      showPanel("workspace");
+      paintGoogle(await window.agy.googleStatus());
+    };
+    $("wsPickJson").onclick = async () => {
+      $("wsGoogleErr").textContent = "";
+      try {
+        const result = await window.agy.googlePickJson();
+        if (result && result.ok === false) return;
+        paintGoogle(await window.agy.googleStatus());
+        $("wsAuthLink").textContent = result.authUrl || result.message || "";
+      } catch (err) {
+        $("wsGoogleErr").textContent = err.message || String(err);
+      }
+    };
+    $("wsUsePaste").onclick = async () => {
+      $("wsGoogleErr").textContent = "";
+      try {
+        const result = await window.agy.googleFromText($("wsPaste").value);
+        $("wsPaste").value = "";
+        paintGoogle(result.connected ? result : await window.agy.googleStatus());
+        $("wsAuthLink").textContent = result.authUrl || result.message || (result.email ? ("Connected " + result.email) : "");
+      } catch (err) {
+        $("wsGoogleErr").textContent = err.message || String(err);
+      }
+    };
+    $("wsDisconnect").onclick = async () => {
+      paintGoogle(await window.agy.googleDisconnect());
+    };
+    $("waSendFile").onclick = async () => {
+      $("waErr").textContent = "";
+      try {
+        const result = await window.agy.whatsappSendFile();
+        if (result.ok) $("waState").textContent = "File sent: " + (result.file || "");
+      } catch (err) {
+        $("waErr").textContent = err.message || String(err);
+      }
     };
     $("saveMem").onclick = async () => {
       await window.agy.memoryWrite({ core: $("memCore").value, daily: $("memDaily").value });

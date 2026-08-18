@@ -5,6 +5,7 @@ const os = require('os')
 const path = require('path')
 const memory = require('./memory')
 const { WhatsAppService } = require('./whatsapp')
+const { GoogleWorkspace, looksLikeClientJson, looksLikeCallbackUrl } = require('./google')
 
 const HOME = os.homedir()
 const AGY_DEFAULT = path.join(process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local'), 'agy', 'bin', 'agy.EXE')
@@ -199,8 +200,48 @@ function getStatus() {
     setupDone: Boolean(cfg.setupDone && agyPath && email),
     models: agyPath ? listModels() : [],
     whatsapp: whatsapp ? whatsapp.status() : { connected: false, hasSession: false, qr: null },
+    workspaceGoogle: googleWs ? googleWs.status() : { connected: false, email: '' },
     memory: memory.readMemory(app.getPath('userData'))
   }
+}
+
+function inboxDir() {
+  const folder = path.join(loadConfig().workspace || HOME, 'agy-inbox')
+  fs.mkdirSync(folder, { recursive: true })
+  return folder
+}
+
+function copyIncomingFiles(urls) {
+  const destDir = inboxDir()
+  const out = []
+  for (const src of urls || []) {
+    if (!src || !fs.existsSync(src)) continue
+    const dest = path.join(destDir, `${Date.now()}-${path.basename(src)}`)
+    try {
+      fs.copyFileSync(src, dest)
+      out.push(dest)
+    } catch {
+      out.push(src)
+    }
+  }
+  return out
+}
+
+function extractOutgoingFiles(text, extra = []) {
+  const found = extra.filter((item) => item && fs.existsSync(item))
+  const workspace = loadConfig().workspace || HOME
+  const matches = String(text || '').match(/(?:[A-Za-z]:\\|\\\\)[^\s"'<>|*?]+/g) || []
+  for (const raw of matches) {
+    const clean = raw.replace(/[.,);]+$/, '')
+    if (fs.existsSync(clean) && fs.statSync(clean).isFile()) found.push(clean)
+  }
+  const rel = String(text || '').match(/(?:SEND_FILE|FILE):\s*(.+)/gi) || []
+  for (const line of rel) {
+    const name = line.replace(/^(SEND_FILE|FILE):\s*/i, '').trim().replace(/^["']|["']$/g, '')
+    const abs = path.isAbsolute(name) ? name : path.join(workspace, name)
+    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) found.push(abs)
+  }
+  return [...new Set(found)]
 }
 
 function buildPrompt(userText, attachments) {
@@ -208,6 +249,16 @@ function buildPrompt(userText, attachments) {
   const brief = memory.brief(app.getPath('userData'))
   if (brief) {
     parts.push('Core memory (follow this):\n' + brief)
+  }
+  if (googleWs && googleWs.status().connected) {
+    const gs = googleWs.status()
+    parts.push(
+      'Google Workspace is connected as ' +
+        gs.email +
+        '. Token file (do not print): ' +
+        googleWs.files().tokens +
+        '. Use Gmail, Drive, Calendar, Docs, Sheets when asked.'
+    )
   }
   if (attachments && attachments.length) {
     const audioExt = /\.(mp3|wav|m4a|ogg|aac|flac|webm)$/i
@@ -231,6 +282,7 @@ let mainWindow = null
 let chatBusy = false
 let currentAgy = null
 let whatsapp = null
+let googleWs = null
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -274,6 +326,7 @@ app.whenReady().then(() => {
   }
   memory.ensureMemory(app.getPath('userData'))
   memory.syncWorkspaceMemory(app.getPath('userData'), cfg.workspace)
+  googleWs = new GoogleWorkspace(app.getPath('userData'), cfg.workspace)
   whatsapp = new WhatsAppService({
     app,
     userData: app.getPath('userData'),
@@ -283,8 +336,10 @@ app.whenReady().then(() => {
       }
     },
     onIncoming: async (msg) => {
+      const files = copyIncomingFiles(msg.mediaUrls || [])
+      const isVoice = /ptt|audio/i.test(String(msg.mediaType || ''))
       const text = String(msg.body || '').trim()
-      if (!text) return
+      if (!text && !files.length) return
       const store = loadSessions()
       let session = store.sessions.find((item) => item.id === 'whatsapp')
       if (!session) {
@@ -299,15 +354,21 @@ app.whenReady().then(() => {
         store.sessions.unshift(session)
       }
       const from = msg.senderName || msg.senderId || 'WhatsApp'
-      session.messages.push({ role: 'user', content: from + ': ' + text, ts: Date.now() })
+      const shown = text || (isVoice ? '[voice note]' : '[file]')
+      session.messages.push({ role: 'user', content: from + ': ' + shown, ts: Date.now() })
       saveSessions(store)
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('chat-updated', session)
       }
       try {
-        await whatsapp.send(msg.chatId, 'Agy is thinking…').catch(() => {})
         const prompt = buildPrompt(
-          'Reply on WhatsApp to ' + from + '. Keep it short and useful.\n\n' + text
+          isVoice
+            ? 'This is a WhatsApp voice note. Transcribe it first, then reply to what was said. Keep the WhatsApp reply short.\n' +
+                (text && !/^\[/.test(text) ? text : '')
+            : files.length
+              ? 'WhatsApp sent a file. Read it if needed and reply.\n' + (text || '')
+              : 'Reply on WhatsApp. Keep it short and useful.\n\n' + text,
+          files
         )
         const args = ['--output-format', 'json', '--print-timeout', '5m']
         if (session.conversation_id) args.push('--conversation', session.conversation_id)
@@ -318,6 +379,9 @@ app.whenReady().then(() => {
         const reply = parsed.text || result.stdout || 'agy returned an empty reply.'
         session.messages.push({ role: 'assistant', content: reply, ts: Date.now() })
         await whatsapp.send(msg.chatId, reply)
+        for (const file of extractOutgoingFiles(reply, files)) {
+          await whatsapp.sendMedia(msg.chatId, file).catch(() => {})
+        }
       } catch (error) {
         const fail = 'Agy error: ' + (error.message || String(error))
         session.messages.push({ role: 'assistant', content: fail, ts: Date.now() })
@@ -456,6 +520,39 @@ ipcMain.handle('chat', async (_event, payload) => {
   const attachments = payload?.attachments || []
   const message = String(payload?.message || '').trim() || (attachments.length ? 'Please use the attached file(s).' : '')
   if (!message) throw new Error('Empty message')
+  if (looksLikeClientJson(message) || looksLikeCallbackUrl(message)) {
+    const store = loadSessions()
+    let session = store.sessions.find((item) => item.id === payload.session_id)
+    if (!session) {
+      session = {
+        id: Date.now().toString(36),
+        title: 'Google Workspace',
+        conversation_id: null,
+        model: '',
+        created: Date.now(),
+        messages: []
+      }
+      store.sessions.unshift(session)
+    }
+    session.messages.push({
+      role: 'user',
+      content: looksLikeClientJson(message) ? '[Google client JSON received]' : '[localhost Google callback URL]',
+      ts: Date.now()
+    })
+    let reply = ''
+    if (looksLikeClientJson(message)) {
+      const result = await googleWs.startConnect(message)
+      reply = result.message + (result.authUrl ? '\n\n' + result.authUrl : '')
+    } else {
+      const status = await googleWs.finishUrl(message)
+      reply = status.connected
+        ? 'Google Workspace connected as ' + (status.email || 'your Google account') + '. Gmail, Drive, Calendar, Docs and Sheets are ready.'
+        : 'Google callback was received but the account is not connected yet.'
+    }
+    session.messages.push({ role: 'assistant', content: reply, ts: Date.now() })
+    saveSessions(store)
+    return { ok: true, session, reply }
+  }
   if (!getStatus().signedIn) throw new Error('Sign in with Google first')
   chatBusy = true
   try {
@@ -529,6 +626,38 @@ ipcMain.handle('whatsapp-disconnect', async () => {
   if (!whatsapp) throw new Error('WhatsApp service is not ready')
   return whatsapp.disconnect()
 })
+
+ipcMain.handle('whatsapp-send-file', async () => {
+  if (!whatsapp || !whatsapp.status().connected) throw new Error('Connect WhatsApp first.')
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'All files', extensions: ['*'] }]
+  })
+  if (result.canceled || !result.filePaths[0]) return { ok: false }
+  const file = result.filePaths[0]
+  await whatsapp.sendMedia(whatsapp.lastChatId || '', file, path.basename(file))
+  return { ok: true, file }
+})
+
+ipcMain.handle('google-status', () => (googleWs ? googleWs.status() : { connected: false }))
+
+ipcMain.handle('google-pick-json', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  })
+  if (result.canceled || !result.filePaths[0]) return { ok: false }
+  const raw = fs.readFileSync(result.filePaths[0], 'utf8')
+  return googleWs.startConnect(raw)
+})
+
+ipcMain.handle('google-from-text', async (_event, text) => {
+  if (looksLikeCallbackUrl(text)) return googleWs.finishUrl(text)
+  if (looksLikeClientJson(text)) return googleWs.startConnect(text)
+  throw new Error('Paste the Google client JSON, or the localhost URL after sign-in.')
+})
+
+ipcMain.handle('google-disconnect', () => googleWs.disconnect())
 
 ipcMain.handle('stop-chat', () => {
   if (currentAgy && currentAgy.pid) {

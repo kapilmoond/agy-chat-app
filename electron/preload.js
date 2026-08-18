@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('agy', {
   whatsappStatus: () => ipcRenderer.invoke('whatsapp-status'),
   whatsappConnect: () => ipcRenderer.invoke('whatsapp-connect'),
   whatsappDisconnect: () => ipcRenderer.invoke('whatsapp-disconnect'),
+  whatsappSendFile: () => ipcRenderer.invoke('whatsapp-send-file'),
+  googleStatus: () => ipcRenderer.invoke('google-status'),
+  googlePickJson: () => ipcRenderer.invoke('google-pick-json'),
+  googleFromText: (text) => ipcRenderer.invoke('google-from-text', text),
+  googleDisconnect: () => ipcRenderer.invoke('google-disconnect'),
   onWhatsApp: (fn) => {
     ipcRenderer.removeAllListeners('whatsapp-event')
     ipcRenderer.on('whatsapp-event', (_event, data) => fn(data))

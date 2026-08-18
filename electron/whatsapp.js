@@ -4,6 +4,7 @@ const http = require('http')
 const path = require('path')
 
 const PORT = 39112
+const PUSH_PORT = 39113
 
 function packedRoot() {
   const packed = path.join(process.resourcesPath || '', 'whatsapp-bridge')
@@ -127,6 +128,10 @@ function spawnBridge(userData, extraArgs) {
       WHATSAPP_MODE: 'self-chat',
       WHATSAPP_DM_POLICY: 'allowlist',
       WHATSAPP_DEBUG: '1',
+      AGY_PUSH_URL: `http://127.0.0.1:${PUSH_PORT}/incoming`,
+      HERMES_IMAGE_CACHE_DIR: path.join(userData, 'wa-media', 'image'),
+      HERMES_DOCUMENT_CACHE_DIR: path.join(userData, 'wa-media', 'document'),
+      HERMES_AUDIO_CACHE_DIR: path.join(userData, 'wa-media', 'audio'),
       WHATSAPP_REPLY_PREFIX: '*Aakalan Agy*\n────────────\n'
     },
     windowsHide: true
@@ -191,10 +196,61 @@ class WhatsAppService {
     this.pairProc = null
     this.bridgeProc = null
     this.pollTimer = null
+    this.pushServer = null
+    this.seen = new Set()
+    this.lastChatId = ''
     this.qr = null
     this.qrDataUrl = ''
     this.connected = false
     this.lastError = ''
+    this.startPushServer()
+  }
+
+  startPushServer() {
+    if (this.pushServer) return
+    this.pushServer = http.createServer((req, res) => {
+      if (req.method !== 'POST' || req.url !== '/incoming') {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      let raw = ''
+      req.on('data', (chunk) => {
+        raw += chunk
+        if (raw.length > 2_000_000) req.destroy()
+      })
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end('{"ok":true}')
+        try {
+          const msg = JSON.parse(raw)
+          this.ingest(msg).catch((error) => {
+            this.lastError = error.message
+            this.onEvent({ type: 'error', error: this.lastError })
+          })
+        } catch {
+          /* ignore */
+        }
+      })
+    })
+    this.pushServer.on('error', () => {
+      this.pushServer = null
+    })
+    this.pushServer.listen(PUSH_PORT, '127.0.0.1')
+  }
+
+  async ingest(msg) {
+    const id = msg.messageId || msg.id || ''
+    if (id) {
+      if (this.seen.has(id)) return
+      this.seen.add(id)
+      if (this.seen.size > 400) {
+        const first = this.seen.values().next().value
+        this.seen.delete(first)
+      }
+    }
+    if (msg.chatId) this.lastChatId = msg.chatId
+    await this.onIncoming(msg)
   }
 
   status() {
@@ -203,6 +259,7 @@ class WhatsAppService {
       hasSession: hasValidCreds(this.userData),
       qr: this.qr,
       qrDataUrl: this.qrDataUrl,
+      lastChatId: this.lastChatId,
       error: this.lastError
     }
   }
@@ -327,15 +384,24 @@ class WhatsAppService {
     const msgs = await httpJson('GET', '/messages')
     if (!Array.isArray(msgs) || !msgs.length) return
     for (const msg of msgs) {
-      const text = String(msg.body || msg.text || '').trim()
-      if (!text) continue
       try {
-        await this.onIncoming(msg)
+        await this.ingest(msg)
       } catch (error) {
         this.lastError = error.message
         this.onEvent({ type: 'error', error: this.lastError })
       }
     }
+  }
+
+  async sendMedia(chatId, filePath, caption) {
+    const target = chatId || this.lastChatId
+    if (!target) throw new Error('No WhatsApp chat to send the file to.')
+    this.lastChatId = target
+    return httpJson('POST', '/send-media', {
+      chatId: target,
+      filePath,
+      caption: caption || ''
+    })
   }
 
   async send(chatId, message) {
