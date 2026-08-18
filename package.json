@@ -1,0 +1,62 @@
+{
+  "name": "aakalan-agy",
+  "productName": "Aakalan Agy",
+  "version": "1.0.0",
+  "description": "Desktop chat app for Google Antigravity CLI (agy). Separate from Aakalan Agent.",
+  "author": "Aaklan Infra Consultancy",
+  "license": "MIT",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.aakalan.agy",
+    "productName": "Aakalan Agy",
+    "executableName": "AakalanAgy",
+    "artifactName": "AakalanAgy-Setup-${version}-${os}-${arch}.${ext}",
+    "copyright": "Copyright © Aaklan Infra Consultancy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "web/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Aakalan Agy",
+      "uninstallDisplayName": "Aakalan Agy",
+      "installerHeader": null,
+      "warningsAsErrors": false
+    },
+    "publish": null
+  }
+}

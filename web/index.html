@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aakalan Agy</title>
+  <style>
+    :root {
+      --bg: #0f1720;
+      --panel: #16202b;
+      --line: #243140;
+      --text: #e8eef4;
+      --muted: #8aa0b3;
+      --accent: #3dbea0;
+      --user: #1d4f63;
+      --bot: #1b2834;
+      --warn: #e2b340;
+      --bad: #e06c75;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+    .hidden { display: none !important; }
+    #setup { min-height: 100%; display: grid; place-items: center; padding: 32px; }
+    .card { width: min(560px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
+    .brand { color: var(--accent); letter-spacing: .12em; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    h1 { margin: 8px 0 8px; font-size: 28px; }
+    p { color: var(--muted); }
+    .steps { display: grid; gap: 10px; margin: 20px 0; }
+    .step { display: flex; justify-content: space-between; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+    .ok { color: var(--accent); font-size: 13px; }
+    .wait { color: var(--warn); font-size: 13px; }
+    button { border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; background: var(--accent); color: #06241c; font-weight: 700; }
+    button.ghost { background: #223040; color: var(--text); }
+    button:disabled { opacity: .55; cursor: wait; }
+    .app { display: grid; grid-template-columns: 270px 1fr; height: 100%; }
+    aside { border-right: 1px solid var(--line); background: #121a22; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    h2 { font-size: 16px; margin: 0; }
+    h2 span { color: var(--accent); }
+    .sub { color: var(--muted); font-size: 12px; }
+    select, input[type=text] { width: 100%; background: #0f1720; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+    .sessions { overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .session { text-align: left; background: #1a2430; color: var(--text); padding: 8px 10px; border-radius: 8px; border: 0; font-weight: 500; }
+    .session.active { outline: 1px solid var(--accent); }
+    main { display: flex; flex-direction: column; min-width: 0; }
+    .bar { padding: 12px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .bar small { color: var(--muted); }
+    #log { flex: 1; overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    .msg { max-width: 76%; padding: 10px 12px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.assistant { align-self: flex-start; background: var(--bot); border: 1px solid var(--line); }
+    .composer { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
+    textarea { flex: 1; min-height: 56px; max-height: 160px; resize: vertical; background: #0f1720; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .empty { margin: auto; color: var(--muted); text-align: center; max-width: 440px; }
+    .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <section id="setup">
+    <div class="card">
+      <div class="brand">Aaklan Infra Consultancy</div>
+      <h1>Aakalan Agy</h1>
+      <p>A desktop app for Google Antigravity CLI. After install, sign in with your Google account. This is not Aakalan Agent.</p>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <strong>1. Install agy</strong><br />
+            <span class="sub" id="agyState">Checking…</span>
+          </div>
+          <button id="installBtn" type="button">Install agy</button>
+        </div>
+        <div class="step">
+          <div>
+            <strong>2. Sign in with Google</strong><br />
+            <span class="sub" id="authState">A browser window will open.</span>
+          </div>
+          <button class="ghost" id="signinBtn" type="button">Sign in with Google</button>
+        </div>
+      </div>
+      <button class="ghost" id="loginWindowBtn" type="button">Open agy login window</button>
+      <p class="err" id="setupErr"></p>
+      <button id="continueBtn" type="button" disabled>Continue to chat</button>
+    </div>
+  </section>
+
+  <section id="app" class="app hidden">
+    <aside>
+      <div>
+        <h2><span>Aakalan</span> Agy</h2>
+        <div class="sub" id="emailLine">Not signed in</div>
+      </div>
+      <button id="newChat" type="button">New chat</button>
+      <label class="sub">Model
+        <select id="model"><option value="">agy default</option></select>
+      </label>
+      <button class="ghost" id="pickFolder" type="button">Choose workspace folder</button>
+      <div class="sub" id="wsLine"></div>
+      <div class="sessions" id="sessions"></div>
+    </aside>
+    <main>
+      <div class="bar">
+        <div>
+          <strong id="title">New chat</strong><br />
+          <small id="status">Ready</small>
+        </div>
+        <small id="agyPath"></small>
+      </div>
+      <div id="log">
+        <div class="empty">Ask Agy anything. Follow-up messages stay in the same conversation.</div>
+      </div>
+      <form class="composer" id="form">
+        <textarea id="input" placeholder="Message Agy…" required></textarea>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </main>
+  </section>
+
+  <script>
+    const state = { sessionId: null, sessions: [], busy: false, status: {} };
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function showApp(on) {
+      $("setup").classList.toggle("hidden", on);
+      $("app").classList.toggle("hidden", !on);
+    }
+
+    function current() {
+      return state.sessions.find((s) => s.id === state.sessionId);
+    }
+
+    function renderSessions() {
+      $("sessions").innerHTML = state.sessions.map((s) =>
+        `<button class="session ${s.id === state.sessionId ? "active" : ""}" data-id="${s.id}" type="button">${escapeHtml(s.title || "Chat")}</button>`
+      ).join("");
+      $("sessions").querySelectorAll("button").forEach((btn) => {
+        btn.onclick = () => {
+          state.sessionId = btn.dataset.id;
+          renderSessions();
+          renderLog();
+        };
+      });
+    }
+
+    function renderLog() {
+      const s = current();
+      if (!s || !s.messages || !s.messages.length) {
+        $("log").innerHTML = '<div class="empty">Ask Agy anything. Follow-up messages stay in the same conversation.</div>';
+        $("title").textContent = "New chat";
+        return;
+      }
+      $("log").innerHTML = s.messages.map((m) =>
+        `<div class="msg ${m.role}">${escapeHtml(m.content)}</div>`
+      ).join("");
+      $("log").scrollTop = $("log").scrollHeight;
+      $("title").textContent = s.title || "Chat";
+    }
+
+    function paintStatus(data) {
+      state.status = data;
+      $("agyState").textContent = data.agyOk ? ("Installed: " + data.agyPath) : "agy is not on this PC yet.";
+      $("agyState").className = data.agyOk ? "ok" : "wait";
+      $("authState").textContent = data.signedIn ? ("Signed in as " + data.email) : "A browser window will open.";
+      $("authState").className = data.signedIn ? "ok" : "wait";
+      $("continueBtn").disabled = !(data.agyOk && data.signedIn);
+      $("emailLine").textContent = data.signedIn ? data.email : "Not signed in";
+      $("wsLine").textContent = data.workspace || "";
+      $("agyPath").textContent = data.agyOk ? "agy ready" : "agy missing";
+      const sel = $("model");
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">agy default</option>' + (data.models || []).map((m) =>
+        `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`
+      ).join("");
+      sel.value = keep;
+    }
+
+    async function refresh() {
+      const data = await window.agy.status();
+      paintStatus(data);
+      const saved = await window.agy.sessions();
+      state.sessions = saved.sessions || [];
+      if (!state.sessionId && state.sessions[0]) state.sessionId = state.sessions[0].id;
+      renderSessions();
+      renderLog();
+      if (data.setupDone) showApp(true);
+      return data;
+    }
+
+    $("installBtn").onclick = async () => {
+      $("setupErr").textContent = "";
+      $("installBtn").disabled = true;
+      $("agyState").textContent = "Installing official agy…";
+      try {
+        const result = await window.agy.installAgy();
+        $("agyState").textContent = result.already ? "Already installed." : "Installed.";
+        await refresh();
+      } catch (err) {
+        $("setupErr").textContent = err.message || String(err);
+      }
+      $("installBtn").disabled = false;
+    };
+
+    $("signinBtn").onclick = async () => {
+      $("setupErr").textContent = "";
+      $("signinBtn").disabled = true;
+      $("authState").textContent = "Waiting for Google sign-in…";
+      try {
+        await window.agy.signInGoogle();
+        await refresh();
+      } catch (err) {
+        $("setupErr").textContent = err.message || String(err);
+      }
+      $("signinBtn").disabled = false;
+    };
+
+    $("loginWindowBtn").onclick = () => window.agy.openAgyLogin();
+
+    $("continueBtn").onclick = async () => {
+      try {
+        await window.agy.finishSetup();
+        showApp(true);
+        await refresh();
+      } catch (err) {
+        $("setupErr").textContent = err.message || String(err);
+      }
+    };
+
+    $("newChat").onclick = async () => {
+      const session = await window.agy.newSession($("model").value);
+      state.sessions.unshift(session);
+      state.sessionId = session.id;
+      renderSessions();
+      renderLog();
+    };
+
+    $("pickFolder").onclick = async () => {
+      const folder = await window.agy.pickFolder();
+      if (folder) $("wsLine").textContent = folder;
+    };
+
+    $("form").onsubmit = async (event) => {
+      event.preventDefault();
+      const text = $("input").value.trim();
+      if (!text || state.busy) return;
+      state.busy = true;
+      $("send").disabled = true;
+      $("status").textContent = "agy is working…";
+      if (!current()) {
+        const created = await window.agy.newSession($("model").value);
+        state.sessions.unshift(created);
+        state.sessionId = created.id;
+      }
+      current().messages.push({ role: "user", content: text });
+      $("input").value = "";
+      renderLog();
+      try {
+        const data = await window.agy.chat({
+          message: text,
+          session_id: state.sessionId,
+          model: $("model").value
+        });
+        const idx = state.sessions.findIndex((s) => s.id === data.session.id);
+        if (idx >= 0) state.sessions[idx] = data.session;
+        else state.sessions.unshift(data.session);
+        state.sessionId = data.session.id;
+      } catch (err) {
+        current().messages.push({ role: "assistant", content: err.message || String(err) });
+      }
+      state.busy = false;
+      $("send").disabled = false;
+      $("status").textContent = "Ready";
+      renderSessions();
+      renderLog();
+      $("input").focus();
+    };
+
+    $("input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        $("form").requestSubmit();
+      }
+    });
+
+    refresh().catch((err) => { $("setupErr").textContent = String(err); });
+  </script>
+</body>
+</html>
