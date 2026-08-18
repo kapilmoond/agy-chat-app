@@ -24,7 +24,7 @@ import express from 'express';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import path from 'path';
-import { mkdirSync, readFileSync, existsSync, readdirSync, unlinkSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { randomBytes, createHash } from 'crypto';
 import { execFileSync } from 'child_process';
@@ -154,6 +154,48 @@ function sendWithTimeout(chatId, payload, options = {}, timeoutMs = SEND_TIMEOUT
     Promise.race([sock.sendMessage(chatId, payload, options), timeoutPromise])
       .finally(() => clearTimeout(timer))
   );
+}
+
+function bareWhatsAppId(jid) {
+  return String(jid || '').replace(/:\d+@/, '@').replace(/@.*/, '');
+}
+
+function collectOwnWhatsAppIds(sock) {
+  const ids = new Set();
+  const add = (jid) => {
+    const bare = bareWhatsAppId(jid);
+    if (bare) ids.add(bare);
+  };
+  add(sock?.user?.id);
+  add(sock?.user?.lid);
+  try {
+    add(jidNormalizedUser(sock?.user?.id));
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (sock?.user?.lid) add(jidNormalizedUser(sock.user.lid));
+  } catch {
+    /* ignore */
+  }
+  try {
+    const ownerFile = path.join(SESSION_DIR, 'owner.json');
+    if (existsSync(ownerFile)) {
+      const owner = JSON.parse(readFileSync(ownerFile, 'utf8'));
+      add(owner.id);
+      add(owner.lid);
+    }
+  } catch {
+    /* ignore */
+  }
+  return ids;
+}
+
+function isOwnSelfChat(sock, chatId, senderId) {
+  const own = collectOwnWhatsAppIds(sock);
+  const chat = bareWhatsAppId(chatId);
+  const sender = bareWhatsAppId(senderId);
+  return Boolean((chat && own.has(chat)) || (sender && own.has(sender)));
 }
 
 function formatOutgoingMessage(message) {
@@ -465,6 +507,20 @@ async function startSocket() {
           }
         : null;
       emitPairEvent({ event: 'connected', user: connectedUser });
+      try {
+        writeFileSync(
+          path.join(SESSION_DIR, 'owner.json'),
+          JSON.stringify({
+            id: sock?.user?.id || null,
+            lid: sock?.user?.lid || null,
+            name: sock?.user?.name || sock?.user?.verifiedName || null,
+            savedAt: Date.now(),
+          }),
+          'utf8'
+        );
+      } catch {
+        /* ignore */
+      }
       if (!PAIR_JSON) {
         console.log('✅ WhatsApp connected!');
       }
@@ -602,17 +658,11 @@ async function startSocket() {
           }
           fromOwner = true;
         } else {
-          // Self-chat mode: only allow messages in the user's own self-chat.
-          // WhatsApp now uses LID (Linked Identity Device) format: 67427329167522@lid
-          // AND classic format: 34652029134@s.whatsapp.net
-          // sock.user has both: { id: "number:10@s.whatsapp.net", lid: "lid_number:10@lid" }
-          const myNumber = (sock.user?.id || '').replace(/:.*@/, '@').replace(/@.*/, '');
-          const myLid = (sock.user?.lid || '').replace(/:.*@/, '@').replace(/@.*/, '');
-          const chatNumber = chatId.replace(/@.*/, '');
-          const isSelfChat = (myNumber && chatNumber === myNumber) || (myLid && chatNumber === myLid);
+          const isSelfChat = isOwnSelfChat(sock, chatId, senderId);
           emitDebugEvent({
             stage: 'self_chat_check',
             matched: !!isSelfChat,
+            fromMe: true,
             chatId: redactWhatsAppId(chatId),
             accountId: redactWhatsAppId(sock.user?.id),
             accountLid: redactWhatsAppId(sock.user?.lid),
@@ -636,17 +686,26 @@ async function startSocket() {
       // to arbitrary incoming messages (#8389).
       if (!msg.key.fromMe) {
         if (WHATSAPP_MODE === 'self-chat') {
-          try {
-            console.log(JSON.stringify({
-              event: 'ignored',
-              reason: 'self_chat_mode_rejects_non_self',
-              chatId,
-              senderId,
-            }));
-          } catch {}
-          continue;
-        }
-        if (WHATSAPP_DM_POLICY !== 'pairing' && !matchesAllowedUser(senderId, ALLOWED_USERS, SESSION_DIR)) {
+          const isSelfChat = isOwnSelfChat(sock, chatId, senderId);
+          emitDebugEvent({
+            stage: 'self_chat_check',
+            matched: !!isSelfChat,
+            fromMe: false,
+            chatId: redactWhatsAppId(chatId),
+            senderId: redactWhatsAppId(senderId),
+          });
+          if (!isSelfChat) {
+            try {
+              console.log(JSON.stringify({
+                event: 'ignored',
+                reason: 'self_chat_mode_rejects_non_self',
+                chatId,
+                senderId,
+              }));
+            } catch {}
+            continue;
+          }
+        } else if (WHATSAPP_DM_POLICY !== 'pairing' && !matchesAllowedUser(senderId, ALLOWED_USERS, SESSION_DIR)) {
           try {
             console.log(JSON.stringify({
               event: 'ignored',

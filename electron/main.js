@@ -251,7 +251,21 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '..', 'web', 'index.html'))
 }
 
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 app.whenReady().then(() => {
+  if (!gotLock) return
   fs.mkdirSync(stateDir(), { recursive: true })
   const cfg = loadConfig()
   fs.mkdirSync(cfg.workspace, { recursive: true })
@@ -286,18 +300,32 @@ app.whenReady().then(() => {
       }
       const from = msg.senderName || msg.senderId || 'WhatsApp'
       session.messages.push({ role: 'user', content: from + ': ' + text, ts: Date.now() })
-      const prompt = buildPrompt(
-        'Reply on WhatsApp to ' + from + '. Keep it short and useful.\n\n' + text
-      )
-      const args = ['--output-format', 'json', '--print-timeout', '5m']
-      if (session.conversation_id) args.push('--conversation', session.conversation_id)
-      args.push('--print', prompt)
-      const result = await runAgy(args, { cwd: loadConfig().workspace })
-      const parsed = extractReply(result.stdout)
-      if (parsed.conversationId) session.conversation_id = parsed.conversationId
-      if (parsed.text) {
-        session.messages.push({ role: 'assistant', content: parsed.text, ts: Date.now() })
-        await whatsapp.send(msg.chatId, parsed.text)
+      saveSessions(store)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('chat-updated', session)
+      }
+      try {
+        await whatsapp.send(msg.chatId, 'Agy is thinking…').catch(() => {})
+        const prompt = buildPrompt(
+          'Reply on WhatsApp to ' + from + '. Keep it short and useful.\n\n' + text
+        )
+        const args = ['--output-format', 'json', '--print-timeout', '5m']
+        if (session.conversation_id) args.push('--conversation', session.conversation_id)
+        args.push('--print', prompt)
+        const result = await runAgy(args, { cwd: loadConfig().workspace })
+        const parsed = extractReply(result.stdout)
+        if (parsed.conversationId) session.conversation_id = parsed.conversationId
+        const reply = parsed.text || result.stdout || 'agy returned an empty reply.'
+        session.messages.push({ role: 'assistant', content: reply, ts: Date.now() })
+        await whatsapp.send(msg.chatId, reply)
+      } catch (error) {
+        const fail = 'Agy error: ' + (error.message || String(error))
+        session.messages.push({ role: 'assistant', content: fail, ts: Date.now() })
+        try {
+          await whatsapp.send(msg.chatId, fail)
+        } catch {
+          /* ignore */
+        }
       }
       saveSessions(store)
       if (mainWindow && !mainWindow.isDestroyed()) {

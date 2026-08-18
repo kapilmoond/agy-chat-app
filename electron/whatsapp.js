@@ -16,6 +16,29 @@ function sessionDir(userData) {
   return path.join(userData, 'whatsapp-session')
 }
 
+function credsPath(userData) {
+  return path.join(sessionDir(userData), 'creds.json')
+}
+
+function hasValidCreds(userData) {
+  try {
+    const raw = fs.readFileSync(credsPath(userData), 'utf8')
+    if (!raw || raw.trim().length < 20) return false
+    const parsed = JSON.parse(raw)
+    return Boolean(parsed && (parsed.me || parsed.noiseKey || parsed.signedIdentityKey))
+  } catch {
+    return false
+  }
+}
+
+function appendLog(userData, text) {
+  try {
+    fs.appendFileSync(path.join(userData, 'whatsapp-bridge.log'), text, 'utf8')
+  } catch {
+    /* ignore */
+  }
+}
+
 function findNode() {
   const tries = []
   try {
@@ -101,6 +124,7 @@ function spawnBridge(userData, extraArgs) {
       ...process.env,
       WHATSAPP_MODE: 'self-chat',
       WHATSAPP_DM_POLICY: 'allowlist',
+      WHATSAPP_DEBUG: '1',
       WHATSAPP_REPLY_PREFIX: '*Aakalan Agy*\n────────────\n'
     },
     windowsHide: true
@@ -171,10 +195,9 @@ class WhatsAppService {
   }
 
   status() {
-    const creds = path.join(sessionDir(this.userData), 'creds.json')
     return {
       connected: this.connected,
-      hasSession: fs.existsSync(creds),
+      hasSession: hasValidCreds(this.userData),
       qr: this.qr,
       error: this.lastError
     }
@@ -192,86 +215,107 @@ class WhatsAppService {
     return false
   }
 
+  attachBridgeIo(proc) {
+    proc.on('error', (error) => {
+      this.lastError = error.message
+      this.onEvent({ type: 'error', error: this.lastError })
+    })
+    proc.stdout.on('data', (chunk) => {
+      const text = String(chunk)
+      appendLog(this.userData, text)
+      text.split(/\r?\n/).forEach((line) => {
+        const row = line.trim()
+        if (!row.startsWith('{')) return
+        try {
+          const event = JSON.parse(row)
+          if (event.event === 'qr' && event.qr) {
+            this.qr = event.qr
+            this.onEvent({ type: 'qr', qr: event.qr })
+          }
+          if (event.event === 'connected' || event.status === 'connected') {
+            this.connected = true
+            this.qr = null
+            this.onEvent({ type: 'connected' })
+          }
+          if (event.event === 'error' && event.error) {
+            this.lastError = String(event.error)
+            this.onEvent({ type: 'error', error: this.lastError })
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+    })
+    proc.stderr.on('data', (chunk) => {
+      const text = String(chunk)
+      appendLog(this.userData, text)
+      this.lastError = text.slice(-600)
+    })
+    proc.on('close', (code) => {
+      this.bridgeProc = null
+      this.connected = false
+      if (!this.qr) {
+        this.lastError = this.lastError || `WhatsApp bridge stopped (code ${code}). Keep Aakalan Agy open.`
+        this.onEvent({ type: 'error', error: this.lastError })
+      }
+    })
+  }
+
+  startPolling() {
+    if (this.pollTimer) clearInterval(this.pollTimer)
+    this.pollTimer = setInterval(() => {
+      this.drain().catch((error) => {
+        this.lastError = error.message
+      })
+    }, 1500)
+    this.waitHealthy(20).then((ok) => {
+      if (ok && hasValidCreds(this.userData)) {
+        this.connected = true
+        this.onEvent({ type: 'connected' })
+      }
+    })
+  }
+
   async startPairing() {
     this.stopPairing()
+    this.stopBridge()
     this.qr = null
     this.lastError = ''
+    if (!hasValidCreds(this.userData)) {
+      try {
+        fs.rmSync(sessionDir(this.userData), { recursive: true, force: true })
+      } catch {
+        /* ignore */
+      }
+    }
     try {
-      this.pairProc = spawnBridge(this.userData, ['--pair-only', '--pair-json'])
+      this.bridgeProc = spawnBridge(this.userData, ['--pair-json'])
     } catch (error) {
       this.lastError = error.message
       this.onEvent({ type: 'error', error: this.lastError })
       return this.status()
     }
-    this.pairProc.on('error', (error) => {
-      this.lastError = error.message
-      this.onEvent({ type: 'error', error: this.lastError })
-    })
-    this.pairProc.stdout.on('data', (chunk) => {
-      String(chunk)
-        .split(/\r?\n/)
-        .forEach((line) => {
-          const text = line.trim()
-          if (!text.startsWith('{')) return
-          try {
-            const event = JSON.parse(text)
-            if (event.event === 'qr' && event.qr) {
-              this.qr = event.qr
-              this.onEvent({ type: 'qr', qr: event.qr })
-            }
-            if (event.event === 'connected' || event.status === 'connected') {
-              this.connected = true
-              this.qr = null
-              this.onEvent({ type: 'paired' })
-            }
-          } catch {
-            /* ignore */
-          }
-        })
-    })
-    this.pairProc.stderr.on('data', (chunk) => {
-      this.lastError = String(chunk).slice(-600)
-    })
-    this.pairProc.on('close', (code) => {
-      this.pairProc = null
-      if (fs.existsSync(path.join(sessionDir(this.userData), 'creds.json'))) {
-        this.startBridge()
-        return
-      }
-      if (!this.qr) {
-        this.lastError = this.lastError || `WhatsApp setup stopped (code ${code}).`
-        this.onEvent({ type: 'error', error: this.lastError })
-      }
-    })
+    this.attachBridgeIo(this.bridgeProc)
+    this.startPolling()
     return this.status()
   }
 
   startBridge() {
+    if (!hasValidCreds(this.userData)) {
+      this.lastError = 'WhatsApp session is empty. Click Connect WhatsApp and scan the QR again.'
+      this.onEvent({ type: 'error', error: this.lastError })
+      return
+    }
     this.stopBridge()
     try {
-      this.bridgeProc = spawnBridge(this.userData, [])
+      this.bridgeProc = spawnBridge(this.userData, ['--pair-json'])
     } catch (error) {
       this.lastError = error.message
       this.onEvent({ type: 'error', error: this.lastError })
       return
     }
-    this.bridgeProc.stderr.on('data', (chunk) => {
-      this.lastError = String(chunk).slice(-600)
-    })
-    this.qr = null
-    this.waitHealthy().then((ok) => {
-      this.connected = ok
-      if (ok) this.onEvent({ type: 'connected' })
-      else {
-        this.lastError = this.lastError || 'WhatsApp bridge started but did not become ready.'
-        this.onEvent({ type: 'error', error: this.lastError })
-      }
-    })
-    this.pollTimer = setInterval(() => {
-      this.drain().catch((error) => {
-        this.lastError = error.message
-      })
-    }, 2500)
+    this.attachBridgeIo(this.bridgeProc)
+    this.startPolling()
   }
 
   async drain() {
@@ -280,7 +324,12 @@ class WhatsAppService {
     for (const msg of msgs) {
       const text = String(msg.body || msg.text || '').trim()
       if (!text) continue
-      await this.onIncoming(msg)
+      try {
+        await this.onIncoming(msg)
+      } catch (error) {
+        this.lastError = error.message
+        this.onEvent({ type: 'error', error: this.lastError })
+      }
     }
   }
 
