@@ -6,51 +6,63 @@
   <title>Aakalan Agy</title>
   <style>
     :root {
-      --bg: #0f1720;
-      --panel: #16202b;
-      --line: #243140;
-      --text: #e8eef4;
-      --muted: #8aa0b3;
-      --accent: #3dbea0;
-      --user: #1d4f63;
-      --bot: #1b2834;
-      --warn: #e2b340;
-      --bad: #e06c75;
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --line: #d5deea;
+      --text: #1b2834;
+      --muted: #5b6b7c;
+      --accent: #1e4f9c;
+      --user: #dceafc;
+      --bot: #ffffff;
+      --warn: #b26a00;
+      --bad: #b42318;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
-      font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+    html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text);
+      font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
     .hidden { display: none !important; }
-    #setup { min-height: 100%; display: grid; place-items: center; padding: 32px; }
+    #setup { height: 100%; overflow: auto; display: grid; place-items: center; padding: 32px; }
     .card { width: min(560px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
-    .brand { color: var(--accent); letter-spacing: .12em; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .brand { color: var(--accent); letter-spacing: .08em; font-size: 12px; font-weight: 700; text-transform: uppercase; }
     h1 { margin: 8px 0 8px; font-size: 28px; }
     p { color: var(--muted); }
     .steps { display: grid; gap: 10px; margin: 20px 0; }
     .step { display: flex; justify-content: space-between; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-    .ok { color: var(--accent); font-size: 13px; }
+    .ok { color: #0b7a4b; font-size: 13px; }
     .wait { color: var(--warn); font-size: 13px; }
-    button { border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; background: var(--accent); color: #06241c; font-weight: 700; }
-    button.ghost { background: #223040; color: var(--text); }
+    button { border: 0; border-radius: 10px; padding: 10px 14px; cursor: pointer; background: var(--accent); color: #fff; font-weight: 700; }
+    button.ghost { background: #e8eef6; color: var(--text); }
     button:disabled { opacity: .55; cursor: wait; }
-    .app { display: grid; grid-template-columns: 270px 1fr; height: 100%; }
-    aside { border-right: 1px solid var(--line); background: #121a22; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    button.rec { background: #b42318; color: #fff; }
+    .app { display: grid; grid-template-columns: 270px 1fr; height: 100%; overflow: hidden; }
+    aside { border-right: 1px solid var(--line); background: #eef3f9; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; min-height: 0; }
+    .logo-wrap { display: flex; gap: 10px; align-items: center; }
+    .logo-wrap img { width: 48px; height: 48px; object-fit: contain; }
     h2 { font-size: 16px; margin: 0; }
     h2 span { color: var(--accent); }
     .sub { color: var(--muted); font-size: 12px; }
-    select, input[type=text] { width: 100%; background: #0f1720; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-    .sessions { overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; }
-    .session { text-align: left; background: #1a2430; color: var(--text); padding: 8px 10px; border-radius: 8px; border: 0; font-weight: 500; }
-    .session.active { outline: 1px solid var(--accent); }
-    main { display: flex; flex-direction: column; min-width: 0; }
-    .bar { padding: 12px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .addr { font-size: 11px; color: var(--muted); line-height: 1.4; }
+    select, input[type=text] { width: 100%; background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+    .sessions { overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+    .session { text-align: left; background: #fff; color: var(--text); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); font-weight: 500; }
+    .session.active { outline: 2px solid var(--accent); }
+    main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); }
+    .bar { padding: 12px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: center; background: #fff; flex-shrink: 0; }
     .bar small { color: var(--muted); }
-    #log { flex: 1; overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-    .msg { max-width: 76%; padding: 10px 12px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
-    .msg.user { align-self: flex-end; background: var(--user); }
+    #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .msg { max-width: 82%; padding: 12px 14px; border-radius: 12px; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: var(--user); white-space: pre-wrap; }
     .msg.assistant { align-self: flex-start; background: var(--bot); border: 1px solid var(--line); }
-    .composer { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
-    textarea { flex: 1; min-height: 56px; max-height: 160px; resize: vertical; background: #0f1720; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .msg.assistant h2, .msg.assistant h3 { margin: 10px 0 6px; color: var(--accent); font-size: 16px; }
+    .msg.assistant p { color: var(--text); margin: 0 0 8px; }
+    .msg.assistant ul, .msg.assistant ol { margin: 6px 0 10px 18px; }
+    .msg.assistant li { margin: 3px 0; }
+    .msg.assistant code { background: #eef3f9; padding: 1px 5px; border-radius: 4px; }
+    .msg.assistant a { color: var(--accent); }
+    .msg.assistant hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+    .msg.progress { align-self: stretch; max-width: 100%; max-height: 140px; overflow: auto; background: #fff8e8; border: 1px solid #f0d9a0; color: #6a4b00; font-size: 13px; white-space: pre-wrap; margin: 0 18px 8px; }
+    .composer { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); background: #fff; flex-shrink: 0; }
+    textarea { flex: 1; min-height: 56px; max-height: 160px; resize: vertical; background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
     .empty { margin: auto; color: var(--muted); text-align: center; max-width: 440px; }
     .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
   </style>
@@ -58,8 +70,13 @@
 <body>
   <section id="setup">
     <div class="card">
-      <div class="brand">Aaklan Infra Consultancy</div>
-      <h1>Aakalan Agy</h1>
+      <div class="logo-wrap">
+        <img src="../assets/logo.png" alt="Aaklan Infra Consultancy" />
+        <div>
+          <div class="brand">Aaklan Infra Consultancy</div>
+          <h1 style="margin:4px 0 0;">Aakalan Agy</h1>
+        </div>
+      </div>
       <p>A desktop app for Google Antigravity CLI. After install, sign in with your Google account. This is not Aakalan Agent.</p>
       <div class="steps">
         <div class="step">
@@ -85,10 +102,14 @@
 
   <section id="app" class="app hidden">
     <aside>
-      <div>
-        <h2><span>Aakalan</span> Agy</h2>
-        <div class="sub" id="emailLine">Not signed in</div>
+      <div class="logo-wrap">
+        <img src="../assets/logo.png" alt="Aaklan" />
+        <div>
+          <h2><span>Aakalan</span> Agy</h2>
+          <div class="sub" id="emailLine">Not signed in</div>
+        </div>
       </div>
+      <div class="addr">Aaklan Infra Consultancy<br />Shop No. 102, 1st Floor, Sector 15<br />Hisar, Haryana<br /><a href="https://aakalaninfra.com">aakalaninfra.com</a><br /><a href="mailto:contact@aakalaninfra.com">contact@aakalaninfra.com</a></div>
       <button id="newChat" type="button">New chat</button>
       <button class="ghost" id="tabChat" type="button">Chat</button>
       <button class="ghost" id="tabMemory" type="button">Memory</button>
@@ -117,9 +138,10 @@
         <div id="log">
           <div class="empty">Ask Agy anything. Memory, files, audio and WhatsApp work like Hermes / Aakalan Agent.</div>
         </div>
+        <div id="progress" class="msg progress hidden"></div>
         <div id="attachBar" class="sub" style="padding:0 18px;"></div>
         <form class="composer" id="form">
-          <button class="ghost" id="btnAudio" type="button">Audio</button>
+          <button class="ghost" id="btnAudio" type="button">Record</button>
           <button class="ghost" id="btnFile" type="button">File</button>
           <textarea id="input" placeholder="Message Agy… Or paste Google client JSON / localhost callback URL here."></textarea>
           <button id="send" type="submit">Send</button>
@@ -190,6 +212,26 @@
       }[c]));
     }
 
+    function formatMd(text) {
+      let html = escapeHtml(text);
+      html = html.replace(/^###### (.+)$/gm, "<h3>$1</h3>");
+      html = html.replace(/^##### (.+)$/gm, "<h3>$1</h3>");
+      html = html.replace(/^#### (.+)$/gm, "<h3>$1</h3>");
+      html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+      html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+      html = html.replace(/^# (.+)$/gm, "<h2>$1</h2>");
+      html = html.replace(/^---+$/gm, "<hr>");
+      html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+      html = html.replace(/\[([^\]]+)\]\((https?:[^)\s]+|file:[^)\s]+|mailto:[^)\s]+)\)/g, '<a href="$2">$1</a>');
+      html = html.replace(/^(?:-|\*) (.+)$/gm, "<li>$1</li>");
+      html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+      html = html.replace(/(?:<li>[\s\S]*?<\/li>\n?)+/g, (block) => "<ul>" + block + "</ul>");
+      html = html.replace(/\n{2,}/g, "</p><p>");
+      html = html.replace(/\n/g, "<br>");
+      return "<p>" + html + "</p>";
+    }
+
     function showApp(on) {
       $("setup").classList.toggle("hidden", on);
       $("app").classList.toggle("hidden", !on);
@@ -220,8 +262,16 @@
         return;
       }
       $("log").innerHTML = s.messages.map((m) =>
-        `<div class="msg ${m.role}">${escapeHtml(m.content)}</div>`
+        m.role === "assistant"
+          ? `<div class="msg assistant">${formatMd(m.content)}</div>`
+          : `<div class="msg user">${escapeHtml(m.content)}</div>`
       ).join("");
+      $("log").querySelectorAll("a").forEach((a) => {
+        a.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          window.agy.openExternal(a.getAttribute("href"));
+        });
+      });
       $("log").scrollTop = $("log").scrollHeight;
       $("title").textContent = s.title || "Chat";
     }
@@ -372,11 +422,48 @@
       $("memDaily").value = mem.daily || "";
       $("rememberLine").value = "";
     };
+    let mediaRec = null;
+    let recChunks = [];
     $("btnAudio").onclick = async () => {
-      const files = await window.agy.pickFiles("audio");
-      state.attachments.push(...(files || []));
-      renderAttach();
+      if (mediaRec) {
+        mediaRec.stop();
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recChunks = [];
+        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+        mediaRec = new MediaRecorder(stream, { mimeType: mime });
+        mediaRec.ondataavailable = (ev) => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+        mediaRec.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          mediaRec = null;
+          $("btnAudio").textContent = "Record";
+          $("btnAudio").classList.remove("rec");
+          const blob = new Blob(recChunks, { type: mime });
+          const buf = new Uint8Array(await blob.arrayBuffer());
+          const saved = await window.agy.saveRecording({ bytes: Array.from(buf), ext: "webm" });
+          state.attachments.push(saved);
+          renderAttach();
+          $("status").textContent = "Voice recorded";
+        };
+        mediaRec.start();
+        $("btnAudio").textContent = "Stop";
+        $("btnAudio").classList.add("rec");
+        $("status").textContent = "Recording… click Stop when done";
+      } catch (err) {
+        $("status").textContent = err.message || "Microphone not available";
+      }
     };
+    window.agy.onProgress((data) => {
+      const box = $("progress");
+      if (!box) return;
+      const line = String((data && data.text) || "").trim();
+      if (!line) return;
+      box.classList.remove("hidden");
+      box.textContent = (box.textContent + "\n" + line).slice(-2500);
+      box.scrollTop = box.scrollHeight;
+    });
     $("btnFile").onclick = async () => {
       const files = await window.agy.pickFiles("file");
       state.attachments.push(...(files || []));
@@ -467,6 +554,8 @@
       state.busy = true;
       $("send").disabled = true;
       $("status").textContent = "agy is working…";
+      const prog = $("progress");
+      if (prog) { prog.classList.remove("hidden"); prog.textContent = "Starting agy CLI…"; }
       if (!current()) {
         const created = await window.agy.newSession($("model").value);
         state.sessions.unshift(created);
@@ -494,6 +583,8 @@
       state.busy = false;
       $("send").disabled = false;
       $("status").textContent = "Ready";
+      const done = $("progress");
+      if (done) done.classList.add("hidden");
       renderSessions();
       renderLog();
       $("input").focus();

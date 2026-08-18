@@ -145,10 +145,14 @@ function runAgy(args, opts = {}) {
       reject(new Error('agy timed out'))
     }, opts.timeoutMs || 5 * 60 * 1000)
     child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString('utf8')
+      const piece = chunk.toString('utf8')
+      stdout += piece
+      emitProgress(piece)
     })
     child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8')
+      const piece = chunk.toString('utf8')
+      stderr += piece
+      emitProgress(piece)
     })
     child.on('error', (error) => {
       clearTimeout(timer)
@@ -235,17 +239,6 @@ function isAudioPath(file) {
   return /\.(ogg|opus|mp3|wav|m4a|aac|flac|webm|mp4)$/i.test(String(file || ''))
 }
 
-function convertVoiceForAgy(src) {
-  const dest = src.replace(/\.[^.]+$/, '') + '.wav'
-  if (dest === src) return src
-  const ffmpeg = spawnSync('ffmpeg', ['-y', '-i', src, '-ac', '1', '-ar', '16000', dest], {
-    windowsHide: true,
-    timeout: 45000
-  })
-  if (ffmpeg.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 100) return dest
-  return src
-}
-
 function saveWhatsAppVoice(urls) {
   const destDir = voiceInboxDir()
   const saved = []
@@ -254,9 +247,15 @@ function saveWhatsAppVoice(urls) {
     const ext = path.extname(src) || '.ogg'
     const dest = path.join(destDir, `whatsapp-voice-${stampName()}${ext}`)
     fs.copyFileSync(src, dest)
-    saved.push(convertVoiceForAgy(dest))
+    saved.push(dest)
   }
   return saved
+}
+
+function emitProgress(text) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('agy-progress', { text: String(text || '').slice(-2500) })
+  }
 }
 
 function copyIncomingFiles(urls) {
@@ -310,7 +309,7 @@ function buildPrompt(userText, attachments) {
   }
   if (attachments && attachments.length) {
     const audio = attachments.filter((item) => isAudioPath(item))
-    const other = attachments.filter((item) => !audioExt.test(item))
+    const other = attachments.filter((item) => !isAudioPath(item))
     if (audio.length) {
       parts.push(
         'Audio files are on disk. Transcribe them first, then answer.\n' +
@@ -338,7 +337,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'Aakalan Agy',
-    backgroundColor: '#0f1720',
+    backgroundColor: '#f4f7fb',
     icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -412,6 +411,11 @@ app.whenReady().then(() => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('chat-updated', session)
       }
+      emitProgress(
+        isVoice
+          ? 'WhatsApp voice saved. Sending the file path to agy CLI…\n' + (files[0] || '')
+          : 'WhatsApp message received. Sending to agy CLI…'
+      )
       try {
         const voicePath = files[0] || ''
         const prompt = isVoice
@@ -659,6 +663,7 @@ ipcMain.handle('chat', async (_event, payload) => {
     if (session.conversation_id) args.push('--conversation', session.conversation_id)
     if (payload.model) args.push('--model', payload.model)
     args.push('--print', buildPrompt(message, payload.attachments || []))
+    emitProgress('agy CLI started. Working on your request…')
     const result = await runAgy(args, { cwd: loadConfig().workspace })
     const parsed = extractReply(result.stdout)
     if (parsed.conversationId) session.conversation_id = parsed.conversationId
@@ -678,6 +683,35 @@ ipcMain.handle('memory-write', (_event, payload) => {
 
 ipcMain.handle('memory-remember', (_event, line) => {
   return memory.remember(app.getPath('userData'), line)
+})
+
+ipcMain.handle('save-recording', (_event, payload) => {
+  const bytes = payload && payload.bytes
+  if (!bytes || !bytes.length) throw new Error('Empty recording')
+  const ext = String(payload.ext || 'webm').replace(/[^a-z0-9]/gi, '') || 'webm'
+  const dest = path.join(inboxDir(), `recorded-${stampName()}.${ext}`)
+  fs.writeFileSync(dest, Buffer.from(bytes))
+  return dest
+})
+
+ipcMain.handle('open-external', async (_event, target) => {
+  const value = String(target || '')
+  if (/^https?:\/\//i.test(value) || /^mailto:/i.test(value)) {
+    await shell.openExternal(value)
+    return { ok: true }
+  }
+  if (/^file:\/\//i.test(value)) {
+    const local = decodeURIComponent(value.replace(/^file:\/\//i, '').replace(/^\/([A-Za-z]:)/, '$1'))
+    if (fs.existsSync(local)) {
+      await shell.openPath(local)
+      return { ok: true }
+    }
+  }
+  if (fs.existsSync(value)) {
+    await shell.openPath(value)
+    return { ok: true }
+  }
+  throw new Error('Cannot open that link')
 })
 
 ipcMain.handle('pick-files', async (_event, kind) => {

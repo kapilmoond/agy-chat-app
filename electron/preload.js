@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('agy', {
   memoryWrite: (payload) => ipcRenderer.invoke('memory-write', payload),
   memoryRemember: (line) => ipcRenderer.invoke('memory-remember', line),
   pickFiles: (kind) => ipcRenderer.invoke('pick-files', kind),
+  saveRecording: (payload) => ipcRenderer.invoke('save-recording', payload),
+  openExternal: (target) => ipcRenderer.invoke('open-external', target),
   whatsappStatus: () => ipcRenderer.invoke('whatsapp-status'),
   whatsappConnect: () => ipcRenderer.invoke('whatsapp-connect'),
   whatsappDisconnect: () => ipcRenderer.invoke('whatsapp-disconnect'),
@@ -33,5 +35,9 @@ contextBridge.exposeInMainWorld('agy', {
   onChatUpdated: (fn) => {
     ipcRenderer.removeAllListeners('chat-updated')
     ipcRenderer.on('chat-updated', (_event, data) => fn(data))
+  },
+  onProgress: (fn) => {
+    ipcRenderer.removeAllListeners('agy-progress')
+    ipcRenderer.on('agy-progress', (_event, data) => fn(data))
   }
 })
