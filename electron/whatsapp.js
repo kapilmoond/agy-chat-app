@@ -190,6 +190,7 @@ class WhatsAppService {
     this.bridgeProc = null
     this.pollTimer = null
     this.qr = null
+    this.qrDataUrl = ''
     this.connected = false
     this.lastError = ''
   }
@@ -199,6 +200,7 @@ class WhatsAppService {
       connected: this.connected,
       hasSession: hasValidCreds(this.userData),
       qr: this.qr,
+      qrDataUrl: this.qrDataUrl,
       error: this.lastError
     }
   }
@@ -230,7 +232,8 @@ class WhatsAppService {
           const event = JSON.parse(row)
           if (event.event === 'qr' && event.qr) {
             this.qr = event.qr
-            this.onEvent({ type: 'qr', qr: event.qr })
+            this.qrDataUrl = event.qrDataUrl || ''
+            this.onEvent({ type: 'qr', qr: event.qr, qrDataUrl: this.qrDataUrl })
           }
           if (event.event === 'connected' || event.status === 'connected') {
             this.connected = true
