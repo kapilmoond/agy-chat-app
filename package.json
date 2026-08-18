@@ -1,7 +1,7 @@
 {
   "name": "aakalan-agy",
   "productName": "Aakalan Agy",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Desktop Agy app: Google sign-in, WhatsApp, Hermes-style memory, audio/files. Separate from Aakalan Agent.",
   "author": "Aaklan Infra Consultancy",
   "license": "MIT",
@@ -33,6 +33,7 @@
       "assets/**/*",
       "package.json"
     ],
+    "afterPack": "./scripts/afterPack.js",
     "extraResources": [
       {
         "from": "assets/icon.ico",
@@ -40,7 +41,12 @@
       },
       {
         "from": "whatsapp-bridge",
-        "to": "whatsapp-bridge"
+        "to": "whatsapp-bridge",
+        "filter": [
+          "*.js",
+          "package.json",
+          "package-lock.json"
+        ]
       }
     ],
     "win": {

@@ -1,11 +1,11 @@
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const fs = require('fs')
 const http = require('http')
 const path = require('path')
 
 const PORT = 39112
 
-function bridgeRoot(app) {
+function packedRoot() {
   const packed = path.join(process.resourcesPath || '', 'whatsapp-bridge')
   const dev = path.join(__dirname, '..', 'whatsapp-bridge')
   if (fs.existsSync(path.join(packed, 'bridge.js'))) return packed
@@ -17,37 +17,92 @@ function sessionDir(userData) {
 }
 
 function findNode() {
-  const candidates = [
-    process.env.npm_node_execpath,
+  const tries = []
+  try {
+    const found = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['node'], {
+      encoding: 'utf8',
+      windowsHide: true
+    })
+    if (found.status === 0) {
+      found.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => tries.push(line))
+    }
+  } catch {
+    /* ignore */
+  }
+  tries.push(
     process.env.NODE_EXE,
     path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe'),
-    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'nodejs', 'node.exe')
-  ].filter(Boolean)
-  for (const item of candidates) {
-    if (item && fs.existsSync(item)) return item
+    path.join(process.env.LOCALAPPDATA || '', 'aakalan', 'node', 'node.exe'),
+    path.join(process.env.APPDATA || '', 'npm', 'node.exe')
+  )
+  for (const item of tries.filter(Boolean)) {
+    if (fs.existsSync(item) && !item.toLowerCase().includes('electron')) return item
   }
   return ''
 }
 
-function spawnBridge(app, userData, extraArgs, envExtra = {}) {
-  const root = bridgeRoot(app)
-  const script = path.join(root, 'bridge.js')
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true })
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name)
+    const to = path.join(dest, entry.name)
+    if (entry.isDirectory()) copyDir(from, to)
+    else fs.copyFileSync(from, to)
+  }
+}
+
+function ensureBridge(userData) {
+  const src = packedRoot()
+  const dest = path.join(userData, 'whatsapp-bridge')
+  fs.mkdirSync(dest, { recursive: true })
+  for (const name of ['bridge.js', 'bridge_helpers.js', 'allowlist.js', 'outbound_ids.js', 'owner_message_gate.js', 'package.json']) {
+    const from = path.join(src, name)
+    if (fs.existsSync(from)) fs.copyFileSync(from, path.join(dest, name))
+  }
+  const destMods = path.join(dest, 'node_modules')
+  const srcMods = path.join(src, 'node_modules')
+  if (!fs.existsSync(path.join(destMods, '@whiskeysockets', 'baileys'))) {
+    if (fs.existsSync(path.join(srcMods, '@whiskeysockets', 'baileys'))) {
+      copyDir(srcMods, destMods)
+    }
+  }
+  if (!fs.existsSync(path.join(destMods, '@whiskeysockets', 'baileys'))) {
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+    const install = spawnSync(npm, ['install', '--omit=dev'], {
+      cwd: dest,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 180000
+    })
+    if (install.status !== 0) {
+      throw new Error(
+        (install.stderr || install.stdout || 'npm install failed').slice(-500)
+      )
+    }
+  }
+  if (!fs.existsSync(path.join(destMods, '@whiskeysockets', 'baileys'))) {
+    throw new Error('WhatsApp libraries are missing. Reinstall Aakalan Agy or install Node.js, then try Connect again.')
+  }
+  return dest
+}
+
+function spawnBridge(userData, extraArgs) {
+  const root = ensureBridge(userData)
+  const node = findNode()
+  if (!node) {
+    throw new Error('Node.js was not found. Install it from https://nodejs.org then click Connect WhatsApp again.')
+  }
   const session = sessionDir(userData)
   fs.mkdirSync(session, { recursive: true })
-  const args = [script, '--session', session, '--port', String(PORT), '--mode', 'self-chat', ...extraArgs]
-  const node = findNode()
-  const cmd = node || process.execPath
-  const env = {
-    ...process.env,
-    WHATSAPP_MODE: 'self-chat',
-    WHATSAPP_DM_POLICY: 'allowlist',
-    WHATSAPP_REPLY_PREFIX: '*Aakalan Agy*\n────────────\n'
-  }
-  if (!node) env.ELECTRON_RUN_AS_NODE = '1'
-  Object.assign(env, envExtra)
-  return spawn(cmd, args, {
+  const args = [path.join(root, 'bridge.js'), '--session', session, '--port', String(PORT), '--mode', 'self-chat', ...extraArgs]
+  return spawn(node, args, {
     cwd: root,
-    env,
+    env: {
+      ...process.env,
+      WHATSAPP_MODE: 'self-chat',
+      WHATSAPP_DM_POLICY: 'allowlist',
+      WHATSAPP_REPLY_PREFIX: '*Aakalan Agy*\n────────────\n'
+    },
     windowsHide: true
   })
 }
@@ -125,7 +180,7 @@ class WhatsAppService {
     }
   }
 
-  async waitHealthy(tries = 12) {
+  async waitHealthy(tries = 16) {
     for (let i = 0; i < tries; i += 1) {
       try {
         await httpJson('GET', '/health')
@@ -141,7 +196,17 @@ class WhatsAppService {
     this.stopPairing()
     this.qr = null
     this.lastError = ''
-    this.pairProc = spawnBridge(this.app, this.userData, ['--pair-only', '--pair-json'])
+    try {
+      this.pairProc = spawnBridge(this.userData, ['--pair-only', '--pair-json'])
+    } catch (error) {
+      this.lastError = error.message
+      this.onEvent({ type: 'error', error: this.lastError })
+      return this.status()
+    }
+    this.pairProc.on('error', (error) => {
+      this.lastError = error.message
+      this.onEvent({ type: 'error', error: this.lastError })
+    })
     this.pairProc.stdout.on('data', (chunk) => {
       String(chunk)
         .split(/\r?\n/)
@@ -165,12 +230,17 @@ class WhatsAppService {
         })
     })
     this.pairProc.stderr.on('data', (chunk) => {
-      this.lastError = String(chunk).slice(-400)
+      this.lastError = String(chunk).slice(-600)
     })
-    this.pairProc.on('close', () => {
+    this.pairProc.on('close', (code) => {
       this.pairProc = null
       if (fs.existsSync(path.join(sessionDir(this.userData), 'creds.json'))) {
         this.startBridge()
+        return
+      }
+      if (!this.qr) {
+        this.lastError = this.lastError || `WhatsApp setup stopped (code ${code}).`
+        this.onEvent({ type: 'error', error: this.lastError })
       }
     })
     return this.status()
@@ -178,10 +248,15 @@ class WhatsAppService {
 
   startBridge() {
     this.stopBridge()
-    this.bridgeProc = spawnBridge(this.app, this.userData, [])
-    this.bridgeProc.stderr.on('data', (chunk) => {
-      this.lastError = String(chunk).slice(-400)
+    try {
+      this.bridgeProc = spawnBridge(this.userData, [])
+    } catch (error) {
+      this.lastError = error.message
       this.onEvent({ type: 'error', error: this.lastError })
+      return
+    }
+    this.bridgeProc.stderr.on('data', (chunk) => {
+      this.lastError = String(chunk).slice(-600)
     })
     this.qr = null
     this.waitHealthy().then((ok) => {
@@ -195,7 +270,6 @@ class WhatsAppService {
     this.pollTimer = setInterval(() => {
       this.drain().catch((error) => {
         this.lastError = error.message
-        this.onEvent({ type: 'error', error: this.lastError })
       })
     }, 2500)
   }

@@ -364,8 +364,16 @@
 
     $("waConnect").onclick = async () => {
       $("waState").textContent = "Preparing QR…";
-      const wa = await window.agy.whatsappConnect();
-      paintWa(wa);
+      $("waErr").textContent = "";
+      try {
+        const wa = await window.agy.whatsappConnect();
+        paintWa(wa);
+        if (!wa.qr && !wa.connected && !wa.error) {
+          $("waErr").textContent = "Waiting for QR. If nothing appears in 15 seconds, close and reopen the app.";
+        }
+      } catch (err) {
+        $("waErr").textContent = err.message || String(err);
+      }
     };
     $("waDisconnect").onclick = async () => {
       paintWa(await window.agy.whatsappDisconnect());
