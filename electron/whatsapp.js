@@ -52,6 +52,19 @@ function spawnBridge(app, userData, extraArgs, envExtra = {}) {
   })
 }
 
+function killTree(proc) {
+  if (!proc || !proc.pid) return
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true })
+    return
+  }
+  try {
+    proc.kill()
+  } catch {
+    /* ignore */
+  }
+}
+
 function httpJson(method, urlPath, body) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null
@@ -112,6 +125,18 @@ class WhatsAppService {
     }
   }
 
+  async waitHealthy(tries = 12) {
+    for (let i = 0; i < tries; i += 1) {
+      try {
+        await httpJson('GET', '/health')
+        return true
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    }
+    return false
+  }
+
   async startPairing() {
     this.stopPairing()
     this.qr = null
@@ -154,12 +179,23 @@ class WhatsAppService {
   startBridge() {
     this.stopBridge()
     this.bridgeProc = spawnBridge(this.app, this.userData, [])
-    this.connected = true
+    this.bridgeProc.stderr.on('data', (chunk) => {
+      this.lastError = String(chunk).slice(-400)
+      this.onEvent({ type: 'error', error: this.lastError })
+    })
     this.qr = null
-    this.onEvent({ type: 'connected' })
+    this.waitHealthy().then((ok) => {
+      this.connected = ok
+      if (ok) this.onEvent({ type: 'connected' })
+      else {
+        this.lastError = this.lastError || 'WhatsApp bridge started but did not become ready.'
+        this.onEvent({ type: 'error', error: this.lastError })
+      }
+    })
     this.pollTimer = setInterval(() => {
       this.drain().catch((error) => {
         this.lastError = error.message
+        this.onEvent({ type: 'error', error: this.lastError })
       })
     }, 2500)
   }
@@ -180,11 +216,7 @@ class WhatsAppService {
 
   stopPairing() {
     if (this.pairProc) {
-      try {
-        this.pairProc.kill()
-      } catch {
-        /* ignore */
-      }
+      killTree(this.pairProc)
       this.pairProc = null
     }
   }
@@ -195,11 +227,7 @@ class WhatsAppService {
       this.pollTimer = null
     }
     if (this.bridgeProc) {
-      try {
-        this.bridgeProc.kill()
-      } catch {
-        /* ignore */
-      }
+      killTree(this.bridgeProc)
       this.bridgeProc = null
     }
     this.connected = false

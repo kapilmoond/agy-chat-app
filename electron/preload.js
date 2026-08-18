@@ -22,5 +22,11 @@ contextBridge.exposeInMainWorld('agy', {
   onWhatsApp: (fn) => {
     ipcRenderer.removeAllListeners('whatsapp-event')
     ipcRenderer.on('whatsapp-event', (_event, data) => fn(data))
+  },
+  stopChat: () => ipcRenderer.invoke('stop-chat'),
+  deleteSession: (id) => ipcRenderer.invoke('delete-session', id),
+  onChatUpdated: (fn) => {
+    ipcRenderer.removeAllListeners('chat-updated')
+    ipcRenderer.on('chat-updated', (_event, data) => fn(data))
   }
 })

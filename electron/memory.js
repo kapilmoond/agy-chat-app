@@ -71,9 +71,19 @@ function remember(userData, line) {
   return readMemory(userData)
 }
 
+function isUnsafeWorkspace(workspace) {
+  const home = require('os').homedir()
+  const resolved = path.resolve(workspace || '')
+  return resolved.toLowerCase() === path.resolve(home).toLowerCase()
+}
+
+function defaultWorkspace() {
+  return path.join(require('os').homedir(), 'Documents', 'AakalanAgy')
+}
+
 function syncWorkspaceMemory(userData, workspace) {
   ensureMemory(userData)
-  if (!workspace) return
+  if (!workspace || isUnsafeWorkspace(workspace)) return
   fs.mkdirSync(workspace, { recursive: true })
   const gemini = path.join(workspace, 'GEMINI.md')
   const pointer = `# Aakalan Agy workspace
@@ -94,5 +104,7 @@ module.exports = {
   writeMemory,
   brief,
   remember,
-  syncWorkspaceMemory
+  syncWorkspaceMemory,
+  isUnsafeWorkspace,
+  defaultWorkspace
 }

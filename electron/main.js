@@ -37,13 +37,19 @@ function writeJson(file, value) {
 }
 
 function loadConfig() {
+  const loaded = readJson(configPath(), {})
+  const fallback = memory.defaultWorkspace()
+  const workspace = loaded.workspace && !memory.isUnsafeWorkspace(loaded.workspace)
+    ? loaded.workspace
+    : fallback
   return Object.assign(
     {
       setupDone: false,
-      workspace: HOME,
+      workspace: fallback,
       model: ''
     },
-    readJson(configPath(), {})
+    loaded,
+    { workspace }
   )
 }
 
@@ -126,10 +132,15 @@ function runAgy(args, opts = {}) {
       windowsHide: opts.hide !== false,
       env: process.env
     })
+    currentAgy = child
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => {
-      child.kill()
+      if (process.platform === 'win32' && child.pid) {
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true })
+      } else {
+        child.kill()
+      }
       reject(new Error('agy timed out'))
     }, opts.timeoutMs || 5 * 60 * 1000)
     child.stdout.on('data', (chunk) => {
@@ -140,10 +151,12 @@ function runAgy(args, opts = {}) {
     })
     child.on('error', (error) => {
       clearTimeout(timer)
+      if (currentAgy === child) currentAgy = null
       reject(error)
     })
     child.on('close', (code) => {
       clearTimeout(timer)
+      if (currentAgy === child) currentAgy = null
       if (code !== 0 && !stdout.trim()) {
         reject(new Error(stderr.trim() || `agy exited ${code}`))
         return
@@ -197,10 +210,18 @@ function buildPrompt(userText, attachments) {
     parts.push('Core memory (follow this):\n' + brief)
   }
   if (attachments && attachments.length) {
-    parts.push(
-      'Attached files on disk (read them if needed):\n' +
-        attachments.map((item) => `- ${item}`).join('\n')
-    )
+    const audioExt = /\.(mp3|wav|m4a|ogg|aac|flac|webm)$/i
+    const audio = attachments.filter((item) => audioExt.test(item))
+    const other = attachments.filter((item) => !audioExt.test(item))
+    if (audio.length) {
+      parts.push(
+        'Audio files are on disk. Transcribe them first, then answer.\n' +
+          audio.map((item) => `- ${item}`).join('\n')
+      )
+    }
+    if (other.length) {
+      parts.push('Attached files on disk (read them if needed):\n' + other.map((item) => `- ${item}`).join('\n'))
+    }
   }
   parts.push('User:\n' + userText)
   return parts.join('\n\n')
@@ -208,6 +229,7 @@ function buildPrompt(userText, attachments) {
 
 let mainWindow = null
 let chatBusy = false
+let currentAgy = null
 let whatsapp = null
 
 function createWindow() {
@@ -231,8 +253,13 @@ function createWindow() {
 
 app.whenReady().then(() => {
   fs.mkdirSync(stateDir(), { recursive: true })
+  const cfg = loadConfig()
+  fs.mkdirSync(cfg.workspace, { recursive: true })
+  if (!readJson(configPath(), {}).workspace || memory.isUnsafeWorkspace(readJson(configPath(), {}).workspace)) {
+    saveConfig(cfg)
+  }
   memory.ensureMemory(app.getPath('userData'))
-  memory.syncWorkspaceMemory(app.getPath('userData'), loadConfig().workspace)
+  memory.syncWorkspaceMemory(app.getPath('userData'), cfg.workspace)
   whatsapp = new WhatsAppService({
     app,
     userData: app.getPath('userData'),
@@ -244,13 +271,37 @@ app.whenReady().then(() => {
     onIncoming: async (msg) => {
       const text = String(msg.body || '').trim()
       if (!text) return
-      const prompt = buildPrompt('WhatsApp from ' + (msg.senderName || msg.senderId) + ':\n' + text)
-      const result = await runAgy(['--output-format', 'json', '--print-timeout', '5m', '--print', prompt], {
-        cwd: loadConfig().workspace
-      })
+      const store = loadSessions()
+      let session = store.sessions.find((item) => item.id === 'whatsapp')
+      if (!session) {
+        session = {
+          id: 'whatsapp',
+          title: 'WhatsApp',
+          conversation_id: null,
+          model: '',
+          created: Date.now(),
+          messages: []
+        }
+        store.sessions.unshift(session)
+      }
+      const from = msg.senderName || msg.senderId || 'WhatsApp'
+      session.messages.push({ role: 'user', content: from + ': ' + text, ts: Date.now() })
+      const prompt = buildPrompt(
+        'Reply on WhatsApp to ' + from + '. Keep it short and useful.\n\n' + text
+      )
+      const args = ['--output-format', 'json', '--print-timeout', '5m']
+      if (session.conversation_id) args.push('--conversation', session.conversation_id)
+      args.push('--print', prompt)
+      const result = await runAgy(args, { cwd: loadConfig().workspace })
       const parsed = extractReply(result.stdout)
+      if (parsed.conversationId) session.conversation_id = parsed.conversationId
       if (parsed.text) {
+        session.messages.push({ role: 'assistant', content: parsed.text, ts: Date.now() })
         await whatsapp.send(msg.chatId, parsed.text)
+      }
+      saveSessions(store)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('chat-updated', session)
       }
     }
   })
@@ -449,4 +500,23 @@ ipcMain.handle('whatsapp-connect', async () => {
 ipcMain.handle('whatsapp-disconnect', async () => {
   if (!whatsapp) throw new Error('WhatsApp service is not ready')
   return whatsapp.disconnect()
+})
+
+ipcMain.handle('stop-chat', () => {
+  if (currentAgy && currentAgy.pid) {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(currentAgy.pid), '/T', '/F'], { windowsHide: true })
+    } else {
+      currentAgy.kill()
+    }
+  }
+  chatBusy = false
+  return { ok: true }
+})
+
+ipcMain.handle('delete-session', (_event, id) => {
+  const store = loadSessions()
+  store.sessions = store.sessions.filter((item) => item.id !== id)
+  saveSessions(store)
+  return store
 })

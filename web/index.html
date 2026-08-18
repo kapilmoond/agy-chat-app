@@ -99,6 +99,7 @@
       <button class="ghost" id="pickFolder" type="button">Choose workspace folder</button>
       <div class="sub" id="wsLine"></div>
       <div class="sessions" id="sessions"></div>
+      <button class="ghost" id="deleteChat" type="button">Delete this chat</button>
     </aside>
     <main>
       <div id="panelChat" style="display:flex;flex-direction:column;height:100%;min-height:0;">
@@ -107,7 +108,10 @@
             <strong id="title">New chat</strong><br />
             <small id="status">Ready</small>
           </div>
-          <small id="agyPath"></small>
+          <div>
+            <small id="agyPath"></small>
+            <button class="ghost" id="stopBtn" type="button">Stop</button>
+          </div>
         </div>
         <div id="log">
           <div class="empty">Ask Agy anything. Memory, files, audio and WhatsApp work like Hermes / Aakalan Agent.</div>
@@ -139,6 +143,7 @@
         <h2>WhatsApp</h2>
         <p class="sub">Connect your own phone like Aakalan Agent. Scan the QR in WhatsApp → Linked devices. Only your chat with yourself is used by default.</p>
         <p id="waState" class="sub">Not connected</p>
+        <p id="waErr" class="err"></p>
         <div id="waQr" style="margin:12px 0;"></div>
         <div style="display:flex;gap:8px;">
           <button id="waConnect" type="button">Connect WhatsApp</button>
@@ -211,7 +216,9 @@
       $("continueBtn").disabled = !(data.agyOk && data.signedIn);
       $("emailLine").textContent = data.signedIn ? data.email : "Not signed in";
       $("wsLine").textContent = data.workspace || "";
-      $("agyPath").textContent = data.agyOk ? "agy ready" : "agy missing";
+      $("agyPath").textContent = data.agyOk
+        ? ("agy ready" + (data.whatsapp && data.whatsapp.connected ? " · WhatsApp on" : ""))
+        : "agy missing";
       const sel = $("model");
       const keep = sel.value;
       sel.innerHTML = '<option value="">agy default</option>' + (data.models || []).map((m) =>
@@ -228,7 +235,7 @@
       if (!state.sessionId && state.sessions[0]) state.sessionId = state.sessions[0].id;
       renderSessions();
       renderLog();
-      if (data.setupDone) showApp(true);
+      if (data.setupDone || (data.agyOk && data.signedIn)) showApp(true);
       return data;
     }
 
@@ -317,16 +324,43 @@
         : wa.hasSession
           ? "Session saved, starting…"
           : "Not connected";
+      $("waErr").textContent = wa.error || "";
       $("waQr").innerHTML = wa.qr
         ? `<img alt="WhatsApp QR" style="width:240px;height:240px;background:#fff;padding:8px" src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(wa.qr)}" />`
         : "";
     }
 
     window.agy.onWhatsApp((event) => {
-      if (event.type === "qr") paintWa({ connected: false, qr: event.qr });
-      if (event.type === "connected" || event.type === "paired") paintWa({ connected: true, qr: null });
-      if (event.type === "disconnected") paintWa({ connected: false, qr: null });
+      if (event.type === "qr") paintWa({ connected: false, qr: event.qr, error: "" });
+      if (event.type === "connected" || event.type === "paired") paintWa({ connected: true, qr: null, error: "" });
+      if (event.type === "disconnected") paintWa({ connected: false, qr: null, error: "" });
+      if (event.type === "error") paintWa({ connected: false, qr: null, error: event.error || "WhatsApp error" });
     });
+    window.agy.onChatUpdated((session) => {
+      const idx = state.sessions.findIndex((s) => s.id === session.id);
+      if (idx >= 0) state.sessions[idx] = session;
+      else state.sessions.unshift(session);
+      if (state.sessionId === session.id || session.id === "whatsapp") {
+        if (!state.sessionId) state.sessionId = session.id;
+        renderSessions();
+        renderLog();
+      }
+    });
+    $("stopBtn").onclick = async () => {
+      await window.agy.stopChat();
+      state.busy = false;
+      $("send").disabled = false;
+      $("status").textContent = "Stopped";
+    };
+    $("deleteChat").onclick = async () => {
+      if (!state.sessionId) return;
+      if (!confirm("Delete this chat?")) return;
+      const store = await window.agy.deleteSession(state.sessionId);
+      state.sessions = store.sessions || [];
+      state.sessionId = state.sessions[0] ? state.sessions[0].id : null;
+      renderSessions();
+      renderLog();
+    };
 
     $("waConnect").onclick = async () => {
       $("waState").textContent = "Preparing QR…";
