@@ -30,7 +30,14 @@ import { randomBytes, createHash } from 'crypto';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import qrcode from 'qrcode-terminal';
-import QRCode from 'qrcode';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+let QRCode = null;
+try {
+  QRCode = require('qrcode');
+} catch {
+  QRCode = null;
+}
 import { matchesAllowedUser, parseAllowedUsers } from './allowlist.js';
 import { createOutboundIdTracker } from './outbound_ids.js';
 import { classifyOwnerMessageGate } from './owner_message_gate.js';
@@ -469,9 +476,13 @@ async function startSocket() {
 
     if (qr) {
       if (PAIR_JSON) {
-        QRCode.toDataURL(qr, { width: 280, margin: 1, color: { dark: '#000000', light: '#ffffff' } })
-          .then((qrDataUrl) => emitPairEvent({ event: 'qr', qr, qrDataUrl }))
-          .catch(() => emitPairEvent({ event: 'qr', qr }));
+        if (QRCode && typeof QRCode.toDataURL === 'function') {
+          QRCode.toDataURL(qr, { width: 280, margin: 1, color: { dark: '#000000', light: '#ffffff' } })
+            .then((qrDataUrl) => emitPairEvent({ event: 'qr', qr, qrDataUrl }))
+            .catch(() => emitPairEvent({ event: 'qr', qr }));
+        } else {
+          emitPairEvent({ event: 'qr', qr });
+        }
       } else {
         console.log('\n📱 Scan this QR code with WhatsApp on your phone:\n');
         qrcode.generate(qr, { small: true });

@@ -84,12 +84,14 @@ function ensureBridge(userData) {
   }
   const destMods = path.join(dest, 'node_modules')
   const srcMods = path.join(src, 'node_modules')
-  if (!fs.existsSync(path.join(destMods, '@whiskeysockets', 'baileys'))) {
-    if (fs.existsSync(path.join(srcMods, '@whiskeysockets', 'baileys'))) {
+  const hasBaileys = (root) => fs.existsSync(path.join(root, '@whiskeysockets', 'baileys'))
+  const hasQrcode = (root) => fs.existsSync(path.join(root, 'qrcode'))
+  if (!hasBaileys(destMods) || !hasQrcode(destMods)) {
+    if (hasBaileys(srcMods)) {
       copyDir(srcMods, destMods)
     }
   }
-  if (!fs.existsSync(path.join(destMods, '@whiskeysockets', 'baileys'))) {
+  if (!hasBaileys(destMods) || !hasQrcode(destMods)) {
     const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
     const install = spawnSync(npm, ['install', '--omit=dev'], {
       cwd: dest,
