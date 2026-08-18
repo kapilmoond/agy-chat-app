@@ -211,6 +211,54 @@ function inboxDir() {
   return folder
 }
 
+function voiceInboxDir() {
+  const folder = path.join(inboxDir(), 'whatsapp-voice')
+  fs.mkdirSync(folder, { recursive: true })
+  return folder
+}
+
+function stampName() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return (
+    d.getFullYear() +
+    pad(d.getMonth() + 1) +
+    pad(d.getDate()) +
+    '-' +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds())
+  )
+}
+
+function isAudioPath(file) {
+  return /\.(ogg|opus|mp3|wav|m4a|aac|flac|webm|mp4)$/i.test(String(file || ''))
+}
+
+function convertVoiceForAgy(src) {
+  const dest = src.replace(/\.[^.]+$/, '') + '.wav'
+  if (dest === src) return src
+  const ffmpeg = spawnSync('ffmpeg', ['-y', '-i', src, '-ac', '1', '-ar', '16000', dest], {
+    windowsHide: true,
+    timeout: 45000
+  })
+  if (ffmpeg.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 100) return dest
+  return src
+}
+
+function saveWhatsAppVoice(urls) {
+  const destDir = voiceInboxDir()
+  const saved = []
+  for (const src of urls || []) {
+    if (!src || !fs.existsSync(src)) continue
+    const ext = path.extname(src) || '.ogg'
+    const dest = path.join(destDir, `whatsapp-voice-${stampName()}${ext}`)
+    fs.copyFileSync(src, dest)
+    saved.push(convertVoiceForAgy(dest))
+  }
+  return saved
+}
+
 function copyIncomingFiles(urls) {
   const destDir = inboxDir()
   const out = []
@@ -261,8 +309,7 @@ function buildPrompt(userText, attachments) {
     )
   }
   if (attachments && attachments.length) {
-    const audioExt = /\.(mp3|wav|m4a|ogg|aac|flac|webm)$/i
-    const audio = attachments.filter((item) => audioExt.test(item))
+    const audio = attachments.filter((item) => isAudioPath(item))
     const other = attachments.filter((item) => !audioExt.test(item))
     if (audio.length) {
       parts.push(
@@ -336,8 +383,11 @@ app.whenReady().then(() => {
       }
     },
     onIncoming: async (msg) => {
-      const files = copyIncomingFiles(msg.mediaUrls || [])
-      const isVoice = /ptt|audio/i.test(String(msg.mediaType || ''))
+      const isVoice =
+        /ptt|audio/i.test(String(msg.mediaType || '')) ||
+        /^audio\//i.test(String(msg.mime || '')) ||
+        (msg.mediaUrls || []).some((item) => isAudioPath(item))
+      const files = isVoice ? saveWhatsAppVoice(msg.mediaUrls || []) : copyIncomingFiles(msg.mediaUrls || [])
       const text = String(msg.body || '').trim()
       if (!text && !files.length) return
       const store = loadSessions()
@@ -354,32 +404,65 @@ app.whenReady().then(() => {
         store.sessions.unshift(session)
       }
       const from = msg.senderName || msg.senderId || 'WhatsApp'
-      const shown = text || (isVoice ? '[voice note]' : '[file]')
+      const shown = isVoice
+        ? 'WhatsApp voice note saved: ' + (files[0] || 'file missing')
+        : text || '[file]'
       session.messages.push({ role: 'user', content: from + ': ' + shown, ts: Date.now() })
       saveSessions(store)
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('chat-updated', session)
       }
       try {
-        const prompt = buildPrompt(
-          isVoice
-            ? 'This is a WhatsApp voice note. Transcribe it first, then reply to what was said. Keep the WhatsApp reply short.\n' +
-                (text && !/^\[/.test(text) ? text : '')
-            : files.length
-              ? 'WhatsApp sent a file. Read it if needed and reply.\n' + (text || '')
-              : 'Reply on WhatsApp. Keep it short and useful.\n\n' + text,
-          files
-        )
-        const args = ['--output-format', 'json', '--print-timeout', '5m']
+        const voicePath = files[0] || ''
+        const prompt = isVoice
+          ? buildPrompt(
+              [
+                'A voice message arrived from WhatsApp.',
+                'The app saved it on this computer.',
+                'Read the audio file at this exact path and convert the speech to text:',
+                voicePath,
+                'This voice message is from WhatsApp.',
+                '1. Transcribe the audio to text.',
+                '2. Then answer what the speaker asked.',
+                '3. Keep the WhatsApp reply short.',
+                text && !/^\[/.test(text) ? 'Caption: ' + text : ''
+              ]
+                .filter(Boolean)
+                .join('\n'),
+              files
+            )
+          : buildPrompt(
+              files.length
+                ? 'WhatsApp sent a file. Read it if needed and reply.\n' + (text || '')
+                : 'Reply on WhatsApp. Keep it short and useful.\n\n' + text,
+              files
+            )
+        const args = [
+          '--output-format',
+          'json',
+          '--print-timeout',
+          '5m',
+          '--add-dir',
+          inboxDir(),
+          '--dangerously-skip-permissions'
+        ]
+        if (isVoice) args.push('--add-dir', voiceInboxDir())
         if (session.conversation_id) args.push('--conversation', session.conversation_id)
         args.push('--print', prompt)
         const result = await runAgy(args, { cwd: loadConfig().workspace })
         const parsed = extractReply(result.stdout)
         if (parsed.conversationId) session.conversation_id = parsed.conversationId
         const reply = parsed.text || result.stdout || 'agy returned an empty reply.'
+        if (isVoice && files[0]) {
+          try {
+            fs.writeFileSync(files[0].replace(/\.[^.]+$/, '') + '.txt', reply, 'utf8')
+          } catch {
+            /* ignore */
+          }
+        }
         session.messages.push({ role: 'assistant', content: reply, ts: Date.now() })
         await whatsapp.send(msg.chatId, reply)
-        for (const file of extractOutgoingFiles(reply, files)) {
+        for (const file of extractOutgoingFiles(reply, isVoice ? [] : files)) {
           await whatsapp.sendMedia(msg.chatId, file).catch(() => {})
         }
       } catch (error) {
