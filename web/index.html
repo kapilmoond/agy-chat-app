@@ -77,7 +77,7 @@
           <h1 style="margin:4px 0 0;">Aakalan Agy</h1>
         </div>
       </div>
-      <p>A desktop app for Google Antigravity CLI. After install, sign in with your Google account. This is not Aakalan Agent.</p>
+      <p>A desktop app for Google Antigravity CLI (<code>agy</code>). This app does not have its own Google login. The CLI account is used as-is. This is not Aakalan Agent.</p>
       <div class="steps">
         <div class="step">
           <div>
@@ -86,15 +86,9 @@
           </div>
           <button id="installBtn" type="button">Install agy</button>
         </div>
-        <div class="step">
-          <div>
-            <strong>2. Sign in with Google</strong><br />
-            <span class="sub" id="authState">A browser window will open.</span>
-          </div>
-          <button class="ghost" id="signinBtn" type="button">Sign in with Google</button>
-        </div>
       </div>
-      <button class="ghost" id="loginWindowBtn" type="button">Open agy login window</button>
+      <p class="sub">On a new PC, if chat says the CLI is not logged in, open the agy window and finish Google sign-in there once. Do not use a print-mode login from this app.</p>
+      <button class="ghost" id="loginWindowBtn" type="button">Open agy window</button>
       <p class="err" id="setupErr"></p>
       <button id="continueBtn" type="button" disabled>Continue to chat</button>
     </div>
@@ -280,10 +274,8 @@
       state.status = data;
       $("agyState").textContent = data.agyOk ? ("Installed: " + data.agyPath) : "agy is not on this PC yet.";
       $("agyState").className = data.agyOk ? "ok" : "wait";
-      $("authState").textContent = data.signedIn ? ("Signed in as " + data.email) : "A browser window will open.";
-      $("authState").className = data.signedIn ? "ok" : "wait";
-      $("continueBtn").disabled = !(data.agyOk && data.signedIn);
-      $("emailLine").textContent = data.signedIn ? data.email : "Not signed in";
+      $("continueBtn").disabled = !data.agyOk;
+      $("emailLine").textContent = data.agyOk ? "agy CLI ready" : "agy not installed";
       $("wsLine").textContent = data.workspace || "";
       $("agyPath").textContent = data.agyOk
         ? ("agy ready" + (data.whatsapp && data.whatsapp.connected ? " · WhatsApp on" : ""))
@@ -304,7 +296,7 @@
       if (!state.sessionId && state.sessions[0]) state.sessionId = state.sessions[0].id;
       renderSessions();
       renderLog();
-      if (data.setupDone || (data.agyOk && data.signedIn)) showApp(true);
+      if (data.setupDone || data.agyOk) showApp(true);
       return data;
     }
 
@@ -320,19 +312,6 @@
         $("setupErr").textContent = err.message || String(err);
       }
       $("installBtn").disabled = false;
-    };
-
-    $("signinBtn").onclick = async () => {
-      $("setupErr").textContent = "";
-      $("signinBtn").disabled = true;
-      $("authState").textContent = "Waiting for Google sign-in…";
-      try {
-        await window.agy.signInGoogle();
-        await refresh();
-      } catch (err) {
-        $("setupErr").textContent = err.message || String(err);
-      }
-      $("signinBtn").disabled = false;
     };
 
     $("loginWindowBtn").onclick = () => window.agy.openAgyLogin();

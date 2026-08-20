@@ -18,7 +18,7 @@ The app injects this into every chat turn. Keep it short and true.
 - Ask only if a missing fact would change correctness.
 
 ## How this app works
-- Brain: Google Antigravity CLI (agy), after Google sign-in.
+- Brain: Google Antigravity CLI (agy). This app uses the CLI session; it does not have a separate Google login.
 - WhatsApp: optional linked-device QR, replies from this same memory.
 - Audio/files: saved under the workspace inbox, then sent to agy.
 `

@@ -1,8 +1,8 @@
 {
   "name": "aakalan-agy",
   "productName": "Aakalan Agy",
-  "version": "1.1.7",
-  "description": "Desktop Agy app: Google sign-in, WhatsApp, Hermes-style memory, audio/files. Separate from Aakalan Agent.",
+  "version": "1.1.8",
+  "description": "Desktop Agy app: agy CLI chat, WhatsApp, Hermes-style memory, audio/files. Separate from Aakalan Agent.",
   "author": "Aaklan Infra Consultancy",
   "license": "MIT",
   "main": "electron/main.js",

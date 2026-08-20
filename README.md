@@ -12,7 +12,7 @@ Suggested GitHub repo: `https://github.com/kapilmoond/aakalan-agy`
 1. Download the Windows installer EXE from the website or GitHub Releases.
 2. Install (Start Menu + Desktop shortcut).
 3. First launch asks to install `agy` if missing.
-4. Then **Sign in with Google**.
+4. Continue to chat. This app does **not** have its own Google login and must not read leftover Gemini `google_accounts.json`.
 5. Chat, WhatsApp QR connect, Hermes-style memory, audio/file input.
 
 Website button (after you upload the Release):
@@ -55,6 +55,10 @@ Installer output:
 
 Do not commit `node_modules` or `release`.
 
-## First-run Google sign-in
+## First-run login (CLI, not this app)
 
-`agy` uses Google OAuth / Windows keyring. This app starts that official flow. It does not store your Google password.
+Aakalan Agy uses the **agy CLI** session. It does not sign in as a second Google account.
+
+- Do not treat `%USERPROFILE%\.gemini\google_accounts.json` as the app login. That file is Gemini leftover and can show the wrong email (for example canal vs the CLI account).
+- Do not run `agy --print` to force Google login. Print mode opens Chrome once, then later fails without opening the browser.
+- On a **new PC**, if chat says the CLI is not logged in, use **Open agy window** and finish Google sign-in there. After that, Windows keeps `gemini:antigravity` in Credential Manager.

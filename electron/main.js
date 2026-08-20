@@ -9,8 +9,6 @@ const { GoogleWorkspace, looksLikeClientJson, looksLikeCallbackUrl } = require('
 
 const HOME = os.homedir()
 const AGY_DEFAULT = path.join(process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local'), 'agy', 'bin', 'agy.EXE')
-const ACCOUNTS_FILE = path.join(HOME, '.gemini', 'google_accounts.json')
-const OAUTH_FILE = path.join(HOME, '.gemini', 'oauth_creds.json')
 
 function stateDir() {
   return path.join(app.getPath('userData'), 'state')
@@ -86,13 +84,30 @@ function findAgy() {
   return ''
 }
 
-function signedInEmail() {
-  const accounts = readJson(ACCOUNTS_FILE, null)
-  if (accounts && typeof accounts.active === 'string' && accounts.active.includes('@')) {
-    return accounts.active
+function cliHasKeyring() {
+  if (process.platform !== 'win32') return true
+  try {
+    const result = spawnSync('cmdkey', ['/list'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 8000
+    })
+    const text = String(result.stdout || '') + String(result.stderr || '')
+    return /gemini:antigravity/i.test(text)
+  } catch {
+    return false
   }
-  if (fs.existsSync(OAUTH_FILE)) return 'Google account connected'
-  return ''
+}
+
+function openAgyInteractive() {
+  const exe = findAgy()
+  if (!exe) throw new Error('Install agy first.')
+  spawn('cmd.exe', ['/k', `"${exe}"`], {
+    cwd: HOME,
+    windowsHide: false,
+    detached: true,
+    shell: true
+  })
 }
 
 function extractReply(stdout) {
@@ -193,15 +208,15 @@ function listModels() {
 
 function getStatus() {
   const cfg = loadConfig()
-  const email = signedInEmail()
   const agyPath = findAgy()
+  const agyOk = Boolean(agyPath)
   return {
     agyPath,
-    agyOk: Boolean(agyPath),
-    signedIn: Boolean(email),
-    email,
+    agyOk,
+    signedIn: agyOk,
+    email: agyOk ? 'agy CLI ready' : '',
     workspace: cfg.workspace,
-    setupDone: Boolean(cfg.setupDone && agyPath && email),
+    setupDone: Boolean(cfg.setupDone && agyOk),
     models: agyPath ? listModels() : [],
     whatsapp: whatsapp ? whatsapp.status() : { connected: false, hasSession: false, qr: null },
     workspaceGoogle: googleWs ? googleWs.status() : { connected: false, email: '' },
@@ -560,42 +575,18 @@ ipcMain.handle('install-agy', async () => {
 })
 
 ipcMain.handle('sign-in-google', async () => {
-  const exe = findAgy()
-  if (!exe) throw new Error('Install agy first.')
-  if (signedInEmail()) return { ok: true, email: signedInEmail(), already: true }
-  // First local launch opens the Google browser if no keyring session exists.
-  const child = spawn(exe, ['--output-format', 'json', '--print-timeout', '8m', '--print', 'Reply with only: SIGNED IN'], {
-    cwd: HOME,
-    windowsHide: false
-  })
-  const started = Date.now()
-  while (Date.now() - started < 8 * 60 * 1000) {
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    if (signedInEmail()) {
-      try {
-        child.kill()
-      } catch {
-        /* ignore */
-      }
-      return { ok: true, email: signedInEmail() }
-    }
-    if (child.exitCode !== null) break
-  }
-  if (signedInEmail()) return { ok: true, email: signedInEmail() }
-  throw new Error('Google sign-in did not finish. Use Open login window and complete it there.')
+  openAgyInteractive()
+  return { ok: true, opened: true }
 })
 
 ipcMain.handle('open-agy-login', async () => {
-  const exe = findAgy()
-  if (!exe) throw new Error('Install agy first.')
-  spawn('cmd.exe', ['/k', `"${exe}"`], { cwd: HOME, windowsHide: false, detached: true, shell: true })
+  openAgyInteractive()
   return { ok: true }
 })
 
 ipcMain.handle('finish-setup', () => {
   const status = getStatus()
   if (!status.agyOk) throw new Error('agy is not installed')
-  if (!status.signedIn) throw new Error('Sign in with Google first')
   const cfg = loadConfig()
   cfg.setupDone = true
   saveConfig(cfg)
@@ -640,7 +631,13 @@ ipcMain.handle('chat', async (_event, payload) => {
     saveSessions(store)
     return { ok: true, session, reply }
   }
-  if (!getStatus().signedIn) throw new Error('Sign in with Google first')
+  if (!findAgy()) throw new Error('agy is not installed')
+  if (!cliHasKeyring()) {
+    openAgyInteractive()
+    throw new Error(
+      'agy CLI is not logged in yet. Finish Google sign-in in the agy window that opened, then send the message again. This app does not have a separate Google login.'
+    )
+  }
   chatBusy = true
   try {
     const store = loadSessions()
