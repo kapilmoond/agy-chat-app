@@ -62,3 +62,4 @@ Aakalan Agy uses the **agy CLI** session. It does not sign in as a second Google
 - Do not treat `%USERPROFILE%\.gemini\google_accounts.json` as the app login. That file is Gemini leftover and can show the wrong email (for example canal vs the CLI account).
 - Do not run `agy --print` to force Google login. Print mode opens Chrome once, then later fails without opening the browser.
 - On a **new PC**, if chat says the CLI is not logged in, use **Open agy window** and finish Google sign-in there. After that, Windows keeps `gemini:antigravity` in Credential Manager.
+- Aakalan Agy always starts agy with `--dangerously-skip-permissions` and `--mode accept-edits`. First launch also writes CLI settings so tools run with no allow prompts and no extra user setup.

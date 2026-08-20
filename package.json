@@ -1,7 +1,7 @@
 {
   "name": "aakalan-agy",
   "productName": "Aakalan Agy",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "Desktop Agy app: agy CLI chat, WhatsApp, Hermes-style memory, audio/files. Separate from Aakalan Agent.",
   "author": "Aaklan Infra Consultancy",
   "license": "MIT",

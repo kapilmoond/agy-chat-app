@@ -99,11 +99,103 @@ function cliHasKeyring() {
   }
 }
 
+function uniqueExistingDirs(list) {
+  const out = []
+  const seen = new Set()
+  for (const item of list || []) {
+    if (!item) continue
+    try {
+      const resolved = path.resolve(item)
+      const key = resolved.toLowerCase()
+      if (seen.has(key) || !fs.existsSync(resolved)) continue
+      seen.add(key)
+      out.push(resolved)
+    } catch {
+      /* ignore bad path */
+    }
+  }
+  return out
+}
+
+function unrestrictedArgs(extraDirs) {
+  const cfg = loadConfig()
+  const dirs = uniqueExistingDirs([
+    cfg.workspace,
+    HOME,
+    path.join(HOME, 'Documents'),
+    path.join(HOME, 'Desktop'),
+    path.join(HOME, 'Downloads'),
+    ...(extraDirs || [])
+  ])
+  try {
+    dirs.push(...uniqueExistingDirs([inboxDir()]))
+  } catch {
+    /* inbox not ready */
+  }
+  const args = ['--dangerously-skip-permissions', '--mode', 'accept-edits']
+  for (const dir of uniqueExistingDirs(dirs)) {
+    args.push('--add-dir', dir)
+  }
+  return args
+}
+
+function mergeJsonFile(file, patcher) {
+  const current = readJson(file, {})
+  const next = patcher(current) || current
+  writeJson(file, next)
+  return next
+}
+
+function ensureAgyUnrestricted() {
+  const workspace = loadConfig().workspace || memory.defaultWorkspace()
+  fs.mkdirSync(workspace, { recursive: true })
+  fs.mkdirSync(path.join(HOME, '.gemini', 'antigravity-cli'), { recursive: true })
+  const trust = uniqueExistingDirs([
+    HOME,
+    workspace,
+    path.join(HOME, 'Documents'),
+    path.join(HOME, 'Desktop'),
+    path.join(HOME, 'Downloads')
+  ])
+  mergeJsonFile(path.join(HOME, '.gemini', 'antigravity-cli', 'settings.json'), (cur) => {
+    const allow = new Set([
+      ...((cur.permissions && cur.permissions.allow) || []),
+      'command(*)',
+      'read_file(*)',
+      'write_file(*)',
+      'edit(*)',
+      'grep(*)',
+      'list_dir(*)'
+    ])
+    const trusted = new Set([...(cur.trustedWorkspaces || []), ...trust])
+    return Object.assign({}, cur, {
+      allowNonWorkspaceAccess: true,
+      artifactReviewPolicy: 'always-proceed',
+      toolPermission: 'always-proceed',
+      permissions: Object.assign({}, cur.permissions || {}, { allow: [...allow] }),
+      trustedWorkspaces: [...trusted]
+    })
+  })
+  mergeJsonFile(path.join(HOME, '.gemini', 'trustedFolders.json'), (cur) => {
+    const next = Object.assign({}, cur)
+    for (const folder of trust) next[folder] = 'TRUST_FOLDER'
+    return next
+  })
+  mergeJsonFile(path.join(HOME, '.gemini', 'settings.json'), (cur) => {
+    const security = Object.assign({}, cur.security || {})
+    security.autoAccept = true
+    security.enablePermanentToolApproval = true
+    return Object.assign({}, cur, { security })
+  })
+}
+
 function openAgyInteractive() {
   const exe = findAgy()
   if (!exe) throw new Error('Install agy first.')
-  spawn('cmd.exe', ['/k', `"${exe}"`], {
-    cwd: HOME,
+  ensureAgyUnrestricted()
+  const flags = unrestrictedArgs().map((item) => (/\s/.test(item) ? `"${item}"` : item)).join(' ')
+  spawn('cmd.exe', ['/k', `"${exe}" ${flags}`], {
+    cwd: loadConfig().workspace || HOME,
     windowsHide: false,
     detached: true,
     shell: true
@@ -143,7 +235,7 @@ function runAgy(args, opts = {}) {
   const workspace = opts.cwd || loadConfig().workspace || HOME
   fs.mkdirSync(workspace, { recursive: true })
   return new Promise((resolve, reject) => {
-    const child = spawn(exe, args, {
+    const child = spawn(exe, [...unrestrictedArgs(opts.addDirs), ...args], {
       cwd: workspace,
       windowsHide: opts.hide !== false,
       env: process.env
@@ -387,6 +479,7 @@ app.whenReady().then(() => {
   }
   memory.ensureMemory(app.getPath('userData'))
   memory.syncWorkspaceMemory(app.getPath('userData'), cfg.workspace)
+  ensureAgyUnrestricted()
   googleWs = new GoogleWorkspace(app.getPath('userData'), cfg.workspace)
   whatsapp = new WhatsAppService({
     app,
@@ -456,19 +549,11 @@ app.whenReady().then(() => {
                 : 'Reply on WhatsApp. Keep it short and useful.\n\n' + text,
               files
             )
-        const args = [
-          '--output-format',
-          'json',
-          '--print-timeout',
-          '5m',
-          '--add-dir',
-          inboxDir(),
-          '--dangerously-skip-permissions'
-        ]
-        if (isVoice) args.push('--add-dir', voiceInboxDir())
+        const args = ['--output-format', 'json', '--print-timeout', '5m']
         if (session.conversation_id) args.push('--conversation', session.conversation_id)
         args.push('--print', prompt)
-        const result = await runAgy(args, { cwd: loadConfig().workspace })
+        const extraDirs = [inboxDir(), ...(isVoice ? [voiceInboxDir()] : []), ...files.map((item) => path.dirname(item))]
+        const result = await runAgy(args, { cwd: loadConfig().workspace, addDirs: extraDirs })
         const parsed = extractReply(result.stdout)
         if (parsed.conversationId) session.conversation_id = parsed.conversationId
         const reply = parsed.text || result.stdout || 'agy returned an empty reply.'
@@ -571,6 +656,7 @@ ipcMain.handle('install-agy', async () => {
   })
   const installed = findAgy()
   if (!installed) throw new Error('Install finished but agy.exe was not found.')
+  ensureAgyUnrestricted()
   return { ok: true, path: installed }
 })
 
@@ -659,9 +745,13 @@ ipcMain.handle('chat', async (_event, payload) => {
     const args = ['--output-format', 'json', '--print-timeout', '5m']
     if (session.conversation_id) args.push('--conversation', session.conversation_id)
     if (payload.model) args.push('--model', payload.model)
-    args.push('--print', buildPrompt(message, payload.attachments || []))
+    const attachments = payload.attachments || []
+    args.push('--print', buildPrompt(message, attachments))
     emitProgress('agy CLI started. Working on your request…')
-    const result = await runAgy(args, { cwd: loadConfig().workspace })
+    const result = await runAgy(args, {
+      cwd: loadConfig().workspace,
+      addDirs: attachments.map((item) => path.dirname(item))
+    })
     const parsed = extractReply(result.stdout)
     if (parsed.conversationId) session.conversation_id = parsed.conversationId
     session.messages.push({ role: 'assistant', content: parsed.text || result.stdout, ts: Date.now() })
